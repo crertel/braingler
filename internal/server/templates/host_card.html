@@ -1,0 +1,47 @@
+{{define "host_card.html"}}<article class="host status-{{.Reachable}}" id="host-{{.Name}}"
+         sse-swap="host-{{.Name}}" hx-swap="outerHTML">
+  <header>
+    <div>
+      <h2>{{.DisplayName}}</h2>
+      <div class="hostname">{{.Hostname}}</div>
+    </div>
+    <span class="status-badge">{{.Reachable}}</span>
+  </header>
+
+  {{if .LastErr}}<div class="err">{{.LastErr}}</div>{{end}}
+
+  {{if .ShowStats}}
+  <dl class="stats">
+    {{if .HasUptime}}<dt>Uptime</dt><dd>{{.UptimePretty}}</dd>{{end}}
+    {{if .HasLoad}}<dt>Load</dt><dd>{{.LoadPretty}}</dd>{{end}}
+    {{if .HasMemory}}<dt>Memory</dt><dd>{{.MemoryPretty}}</dd>{{end}}
+    {{if .Disks}}<dt>Disks</dt><dd>
+      <ul class="disks">
+        {{range .Disks}}
+          <li>
+            <span><span class="mount">{{.Mount}}</span> <span class="fstype">{{.FSType}}</span></span>
+            <span class="pct{{if ge .UsedPct 85}} high{{end}}">{{.UsedPct}}%</span>
+          </li>
+        {{end}}
+      </ul>
+    </dd>{{end}}
+  </dl>
+  {{end}}
+
+  <div class="actions">
+    {{if .CanWake}}
+    <form hx-post="/hosts/{{.Name}}/wake" hx-swap="none">
+      <button type="submit"{{if .IsUp}} disabled title="host is up"{{end}}>Wake</button>
+    </form>
+    {{end}}
+    {{if .CanShutdown}}
+    <form hx-post="/hosts/{{.Name}}/shutdown" hx-swap="none"
+          hx-confirm="Shut down {{.DisplayName}}?">
+      <button type="submit" class="danger"{{if not .IsUp}} disabled title="host is not up"{{end}}>Shutdown</button>
+    </form>
+    {{end}}
+  </div>
+
+  <div class="checked">checked {{.LastCheckedPretty}}</div>
+</article>
+{{end}}

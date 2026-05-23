@@ -1,0 +1,22 @@
+{{define "index.html"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>braingler</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/htmx.min.js"></script>
+  <script src="/static/htmx-ext-sse.js"></script>
+</head>
+<body>
+  <header class="top">
+    <h1>braingler</h1>
+    <span class="sub">{{.HostCount}} host{{if ne .HostCount 1}}s{{end}}</span>
+  </header>
+  <main class="hosts" hx-ext="sse" sse-connect="/events">
+    {{range .Hosts}}{{template "host_card.html" .}}{{end}}
+  </main>
+  <footer class="bottom">live updates via SSE</footer>
+</body>
+</html>
+{{end}}

@@ -1,0 +1,21 @@
+{
+  "listen": {"address": "127.0.0.1:8081"},
+  "poll_interval_seconds": 3,
+  "auth": {
+    "enabled": true,
+    "users": [
+      {"username": "admin", "password_hash": "$2a$04$0jEMp5aFR56HxzS7N4DRA.pbGrf4TliWKUZTjB5MW2h2Md0uDmIDW", "groups": ["admin"]},
+      {"username": "guest", "password_hash": "$2a$04$o6NdA8CsRl6bJ38uAsM57emZiq0N5unNO.m4t2I3Y04V1XosF7132", "groups": ["viewer"]}
+    ],
+    "groups": {
+      "admin":  {"hosts": ["*"], "actions": ["*"]},
+      "viewer": {"hosts": ["loopback"], "actions": ["status"]}
+    }
+  },
+  "hosts": [
+    {"name": "loopback", "hostname": "127.0.0.1", "mac": "02:00:00:00:00:01", "broadcast": "127.255.255.255",
+     "checks": {"ping": {"enabled": true}}},
+    {"name": "nowhere", "hostname": "192.0.2.123", "mac": "02:00:00:00:00:02", "broadcast": "192.0.2.255",
+     "checks": {"ping": {"enabled": true}}}
+  ]
+}

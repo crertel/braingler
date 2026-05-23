@@ -1,0 +1,10 @@
+{
+  "listen": {"address": "127.0.0.1:8080"},
+  "poll_interval_seconds": 2,
+  "hosts": [
+    {"name": "loopback", "hostname": "127.0.0.1", "mac": "02:00:00:00:00:01", "broadcast": "127.255.255.255",
+     "checks": {"ping": {"enabled": true}}},
+    {"name": "nowhere", "hostname": "192.0.2.123", "mac": "02:00:00:00:00:02", "broadcast": "192.0.2.255",
+     "checks": {"ping": {"enabled": true}}}
+  ]
+}

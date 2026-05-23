@@ -1,0 +1,57 @@
+{
+  "listen": {
+    "address": "127.0.0.1:8080"
+  },
+
+  "poll_interval_seconds": 7,
+
+  "ssh_defaults": {
+    "user": "operator",
+    "key_file": "~/.ssh/id_ed25519",
+    "port": 22,
+    "timeout_seconds": 5
+  },
+
+  "auth": {
+    "enabled": true,
+    "users": [
+      {
+        "username": "operator",
+        "password_hash": "REPLACE-ME — run `braingler hash-password`",
+        "groups": ["admin"]
+      }
+    ],
+    "groups": {
+      "admin":  { "hosts": ["*"], "actions": ["*"] },
+      "viewer": { "hosts": ["*"], "actions": ["status"] }
+    }
+  },
+
+  "hosts": [
+    {
+      "name": "lab-alpha",
+      "display_name": "Workstation Alpha",
+      "hostname": "lab-alpha.local",
+      "mac": "02:00:00:00:00:11",
+      "broadcast": "192.168.1.255",
+      "checks": {
+        "ping":   { "enabled": true },
+        "uptime": { "enabled": true },
+        "load":   { "enabled": true },
+        "memory": { "enabled": true, "every": 2 },
+        "disk":   { "enabled": true, "every": 6 }
+      }
+    },
+    {
+      "name": "lab-beta",
+      "display_name": "Workstation Beta",
+      "hostname": "lab-beta.local",
+      "mac": "02:00:00:00:00:12",
+      "broadcast": "192.168.1.255",
+      "checks": {
+        "ping":   { "enabled": true },
+        "uptime": { "enabled": true }
+      }
+    }
+  ]
+}

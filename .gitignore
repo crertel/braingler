@@ -1,0 +1,8 @@
+/.go/
+/braingler
+/result
+/result-*
+*.swp
+
+# User's real config — contains hostnames/MACs/etc. Commit example only.
+/config.json
