@@ -1,0 +1,23 @@
+{
+  "listen": {"address": "127.0.0.1:8082"},
+  "poll_interval_seconds": 3,
+  "auth": {
+    "enabled": true,
+    "users": [
+      {"username": "admin", "password_hash": "$2a$04$0jEMp5aFR56HxzS7N4DRA.pbGrf4TliWKUZTjB5MW2h2Md0uDmIDW", "groups": ["admin"]}
+    ],
+    "api_tokens": [
+      {"name": "claude-ro", "token_hash": "sha256:3ea17b1f8acb0eb312cafa5377300b5aff16bcf14622ea2707a01663f007a427", "groups": ["viewer"]}
+    ],
+    "groups": {
+      "admin":  {"hosts": ["*"], "actions": ["*"]},
+      "viewer": {"hosts": ["loopback"], "actions": ["status"]}
+    }
+  },
+  "hosts": [
+    {"name": "loopback", "hostname": "127.0.0.1", "mac": "02:00:00:00:00:01", "broadcast": "127.255.255.255",
+     "checks": {"ping": {"enabled": true}}},
+    {"name": "nowhere", "hostname": "192.0.2.123", "mac": "02:00:00:00:00:02", "broadcast": "192.0.2.255",
+     "checks": {"ping": {"enabled": true}}}
+  ]
+}

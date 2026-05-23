@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -9,12 +10,14 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/crertel/braingler/internal/auth"
 	"github.com/crertel/braingler/internal/config"
+	"github.com/crertel/braingler/internal/events"
 	"github.com/crertel/braingler/internal/hosts"
 	"github.com/crertel/braingler/internal/monitor"
 	"github.com/crertel/braingler/internal/server"
@@ -27,11 +30,12 @@ import (
 const usage = `braingler — Wake-on-LAN dashboard for homelab hosts
 
 Usage:
-  braingler serve    [--config PATH]            Run the monitor (HTTP server arrives later).
-  braingler check    [--config PATH]            Load and validate the config file.
-  braingler wake     [--config PATH] HOST       Send a Wake-on-LAN packet to HOST.
-  braingler shutdown [--config PATH] HOST       Shut HOST down via SSH.
-  braingler hash-password                       Read a password from stdin, print bcrypt hash.
+  braingler serve        [--config PATH]                  Run the monitor + HTTP server.
+  braingler check        [--config PATH]                  Load and validate the config file.
+  braingler wake         [--config PATH] HOST             Send a Wake-on-LAN packet to HOST.
+  braingler shutdown     [--config PATH] HOST             Shut HOST down via SSH.
+  braingler hash-password                                 Read a password from stdin, print bcrypt hash.
+  braingler issue-token  --name NAME --groups G1,G2       Mint a new API bearer token.
   braingler version
 `
 
@@ -54,6 +58,8 @@ func main() {
 		os.Exit(runWake(os.Args[2:]))
 	case "shutdown":
 		os.Exit(runShutdown(os.Args[2:]))
+	case "issue-token":
+		os.Exit(runIssueToken(os.Args[2:]))
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	default:
@@ -76,7 +82,8 @@ func runServe(args []string) int {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	reg := hosts.New()
-	mon := monitor.New(c, reg, logger)
+	evlog := events.New(1024)
+	mon := monitor.New(c, reg, logger).WithEventLog(evlog)
 
 	var authn *auth.Authenticator
 	if c.Auth.Enabled {
@@ -97,7 +104,7 @@ func runServe(args []string) int {
 		return sshx.Shutdown(ctx, h.Hostname, sshCfg)
 	}
 
-	srv, err := server.New(c, reg, logger, authn, wake, shutdown)
+	srv, err := server.New(c, reg, logger, authn, evlog, wake, shutdown)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "server init: %v\n", err)
 		return 1
@@ -197,6 +204,49 @@ func runCheck(args []string) int {
 		return 1
 	}
 	fmt.Printf("config OK: %d host(s), auth=%v\n", len(c.Hosts), c.Auth.Enabled)
+	return 0
+}
+
+func runIssueToken(args []string) int {
+	fs := flag.NewFlagSet("issue-token", flag.ContinueOnError)
+	name := fs.String("name", "", "human-readable name for the token")
+	groupsCSV := fs.String("groups", "", "comma-separated group names")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *name == "" || *groupsCSV == "" {
+		fmt.Fprintln(os.Stderr, "issue-token: --name and --groups are required")
+		return 2
+	}
+	groups := make([]string, 0)
+	for g := range strings.SplitSeq(*groupsCSV, ",") {
+		if g = strings.TrimSpace(g); g != "" {
+			groups = append(groups, g)
+		}
+	}
+	if len(groups) == 0 {
+		fmt.Fprintln(os.Stderr, "issue-token: --groups must list at least one group")
+		return 2
+	}
+
+	tok, hash, err := auth.MintToken()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "issue-token: %v\n", err)
+		return 1
+	}
+
+	entry := config.APIToken{Name: *name, TokenHash: hash, Groups: groups}
+	pretty, _ := json.MarshalIndent(entry, "  ", "  ")
+
+	fmt.Println("New API token — this is the only time it will be shown:")
+	fmt.Println()
+	fmt.Println("  " + tok)
+	fmt.Println()
+	fmt.Println("Add this entry to your config's auth.api_tokens array:")
+	fmt.Println()
+	fmt.Println("  " + string(pretty))
+	fmt.Println()
+	fmt.Println("Send it in API requests as:  Authorization: Bearer " + tok)
 	return 0
 }
 

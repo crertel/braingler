@@ -1,0 +1,321 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "braingler",
+    "version": "1.0.0",
+    "summary": "Wake-on-LAN dashboard for homelab hosts",
+    "description": "Status monitoring (ping + SSH-derived metrics), Wake-on-LAN, and SSH shutdown for a small fleet of hosts. The HTML UI is a thin wrapper over this same API."
+  },
+  "servers": [
+    { "url": "/api/v1" }
+  ],
+  "security": [
+    { "bearerAuth": [] },
+    { "cookieAuth": [] }
+  ],
+  "paths": {
+    "/openapi.json": {
+      "get": {
+        "summary": "Fetch this specification.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OpenAPI document.",
+            "content": { "application/json": { "schema": { "type": "object" } } }
+          }
+        }
+      }
+    },
+    "/whoami": {
+      "get": {
+        "summary": "Identity and effective permissions for the current caller.",
+        "responses": {
+          "200": {
+            "description": "Caller details.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Whoami" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/hosts": {
+      "get": {
+        "summary": "List hosts the caller can see.",
+        "responses": {
+          "200": {
+            "description": "Filtered host list.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HostList" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/hosts/{name}": {
+      "parameters": [
+        { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "summary": "One host with current status and permissions.",
+        "responses": {
+          "200": {
+            "description": "Host detail.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Host" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/hosts/{name}/wake": {
+      "parameters": [
+        { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "post": {
+        "summary": "Send a Wake-on-LAN magic packet.",
+        "responses": {
+          "202": {
+            "description": "Wake submitted. The host may take seconds to come up.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ActionResponse" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/hosts/{name}/shutdown": {
+      "parameters": [
+        { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "post": {
+        "summary": "Shut the host down via SSH (sudo shutdown -hP now).",
+        "responses": {
+          "202": {
+            "description": "Shutdown submitted.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ActionResponse" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/events": {
+      "get": {
+        "summary": "Paged event log: state transitions and action attempts.",
+        "parameters": [
+          { "name": "since", "in": "query", "required": false,
+            "description": "Return only events with id > since. Pass back the previous response's next_id to resume.",
+            "schema": { "type": "integer", "format": "int64", "minimum": 0 } },
+          { "name": "limit", "in": "query", "required": false,
+            "description": "Max events to return. Defaults to 200, caps at 1000.",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 1000 } },
+          { "name": "host", "in": "query", "required": false,
+            "description": "Restrict to one host.",
+            "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of events plus paging cursors.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EventsPage" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "503": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/events/stream": {
+      "get": {
+        "summary": "Server-Sent Events stream of events as they happen.",
+        "description": "Each event is delivered as `event: <kind>\\ndata: <event-json>`. Optionally pass since=ID to replay history before live updates.",
+        "parameters": [
+          { "name": "since", "in": "query", "required": false,
+            "schema": { "type": "integer", "format": "int64", "minimum": 0 } },
+          { "name": "host", "in": "query", "required": false,
+            "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE stream.",
+            "content": { "text/event-stream": { "schema": { "type": "string" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "503": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "API token minted via `braingler issue-token`."
+      },
+      "cookieAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "braingler_session",
+        "description": "Browser session cookie set by POST /login."
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "Missing or invalid credentials.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } }
+      },
+      "Forbidden": {
+        "description": "Authenticated, but not permitted to perform this action.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } }
+      },
+      "NotFound": {
+        "description": "Host does not exist or is not visible to the caller.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } }
+      },
+      "Error": {
+        "description": "Generic server-side failure.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } }
+      }
+    },
+    "schemas": {
+      "ApiError": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error":   { "type": "string", "description": "Machine-readable code, e.g. \"host_not_found\"." },
+          "message": { "type": "string", "description": "Human-readable detail." }
+        }
+      },
+      "Whoami": {
+        "type": "object",
+        "required": ["name", "kind", "auth_mode"],
+        "properties": {
+          "name":      { "type": "string" },
+          "kind":      { "type": "string", "enum": ["user", "agent", "anonymous"] },
+          "groups":    { "type": "array", "items": { "type": "string" } },
+          "hosts":     { "type": "array", "items": { "type": "string" }, "description": "Host names the caller can see." },
+          "auth_mode": { "type": "string", "enum": ["cookie", "bearer", "disabled"] }
+        }
+      },
+      "HostList": {
+        "type": "object",
+        "required": ["hosts"],
+        "properties": {
+          "hosts": { "type": "array", "items": { "$ref": "#/components/schemas/Host" } }
+        }
+      },
+      "Host": {
+        "type": "object",
+        "required": ["name", "display_name", "hostname", "mac", "broadcast", "status", "permissions", "checks"],
+        "properties": {
+          "name":         { "type": "string" },
+          "display_name": { "type": "string" },
+          "hostname":     { "type": "string" },
+          "mac":          { "type": "string" },
+          "broadcast":    { "type": "string" },
+          "status":       { "$ref": "#/components/schemas/Status" },
+          "permissions":  { "$ref": "#/components/schemas/Permissions" },
+          "checks":       { "type": "array", "items": { "$ref": "#/components/schemas/CheckConfig" } }
+        }
+      },
+      "Status": {
+        "type": "object",
+        "required": ["reachable"],
+        "properties": {
+          "reachable":      { "type": "string", "enum": ["up", "down", "unknown"] },
+          "last_checked":   { "type": "string", "format": "date-time" },
+          "last_change":    { "type": "string", "format": "date-time" },
+          "last_error":     { "type": "string" },
+          "uptime_seconds": { "type": "integer", "format": "int64" },
+          "load":           { "$ref": "#/components/schemas/Load" },
+          "memory":         { "$ref": "#/components/schemas/Memory" },
+          "disks":          { "type": "array", "items": { "$ref": "#/components/schemas/Disk" } }
+        }
+      },
+      "Load": {
+        "type": "object",
+        "required": ["one", "five", "fifteen"],
+        "properties": {
+          "one":     { "type": "number" },
+          "five":    { "type": "number" },
+          "fifteen": { "type": "number" }
+        }
+      },
+      "Memory": {
+        "type": "object",
+        "required": ["total_kb", "available_kb", "used_pct"],
+        "properties": {
+          "total_kb":     { "type": "integer" },
+          "available_kb": { "type": "integer" },
+          "used_pct":     { "type": "integer", "minimum": 0, "maximum": 100 }
+        }
+      },
+      "Disk": {
+        "type": "object",
+        "required": ["mount", "fstype", "used_pct"],
+        "properties": {
+          "mount":    { "type": "string" },
+          "fstype":   { "type": "string" },
+          "used_pct": { "type": "integer", "minimum": 0, "maximum": 100 }
+        }
+      },
+      "Permissions": {
+        "type": "object",
+        "required": ["can_status", "can_wake", "can_shutdown"],
+        "properties": {
+          "can_status":   { "type": "boolean" },
+          "can_wake":     { "type": "boolean" },
+          "can_shutdown": { "type": "boolean" }
+        }
+      },
+      "CheckConfig": {
+        "type": "object",
+        "required": ["name", "enabled", "every"],
+        "properties": {
+          "name":    { "type": "string", "enum": ["ping", "uptime", "load", "memory", "disk"] },
+          "enabled": { "type": "boolean" },
+          "every":   { "type": "integer", "minimum": 1 }
+        }
+      },
+      "ActionResponse": {
+        "type": "object",
+        "required": ["action_id", "host", "action", "status"],
+        "properties": {
+          "action_id": { "type": "string", "description": "Correlation ID; matches the action_id on the resulting event." },
+          "host":      { "type": "string" },
+          "action":    { "type": "string", "enum": ["wake", "shutdown"] },
+          "status":    { "type": "string", "enum": ["submitted"] }
+        }
+      },
+      "EventsPage": {
+        "type": "object",
+        "required": ["events", "latest_id", "next_id"],
+        "properties": {
+          "events":    { "type": "array", "items": { "$ref": "#/components/schemas/Event" } },
+          "latest_id": { "type": "integer", "format": "int64", "description": "Newest event id in the log overall." },
+          "next_id":   { "type": "integer", "format": "int64", "description": "Cursor for the next page (pass back as ?since=)." }
+        }
+      },
+      "Event": {
+        "type": "object",
+        "required": ["id", "ts", "host", "kind"],
+        "properties": {
+          "id":        { "type": "integer", "format": "int64" },
+          "ts":        { "type": "string", "format": "date-time" },
+          "host":      { "type": "string" },
+          "kind":      {
+            "type": "string",
+            "enum": ["state_change", "wake_sent", "wake_failed", "shutdown_sent", "shutdown_failed"]
+          },
+          "from":      { "type": "string", "description": "Prior reachability (state_change only)." },
+          "to":        { "type": "string", "description": "New reachability (state_change only)." },
+          "actor":     { "type": "string", "description": "Principal that triggered the action (action events only)." },
+          "action_id": { "type": "string", "description": "Correlates with the originating action response." },
+          "error":     { "type": "string", "description": "Set when the event records a failure." }
+        }
+      }
+    }
+  }
+}

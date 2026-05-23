@@ -21,6 +21,7 @@ import (
 
 	"github.com/crertel/braingler/internal/auth"
 	"github.com/crertel/braingler/internal/config"
+	"github.com/crertel/braingler/internal/events"
 	"github.com/crertel/braingler/internal/hosts"
 )
 
@@ -29,6 +30,9 @@ var templateFS embed.FS
 
 //go:embed static
 var staticFS embed.FS
+
+//go:embed openapi.json
+var openapiSpec []byte
 
 // Server bundles dependencies the handlers need. Construct via New.
 type Server struct {
@@ -39,6 +43,7 @@ type Server struct {
 	wake     WakeFunc
 	shutdown ShutdownFunc
 	authn    *auth.Authenticator // nil if auth is disabled in config
+	events   *events.Log         // nil disables the audit log
 }
 
 // WakeFunc and ShutdownFunc are injected so the server doesn't import wol/sshx
@@ -48,7 +53,8 @@ type WakeFunc func(ctx context.Context, h *config.Host) error
 type ShutdownFunc func(ctx context.Context, h *config.Host, cfg config.SSHConfig) error
 
 func New(cfg *config.Config, reg *hosts.Registry, logger *slog.Logger,
-	authn *auth.Authenticator, wake WakeFunc, shutdown ShutdownFunc) (*Server, error) {
+	authn *auth.Authenticator, evts *events.Log,
+	wake WakeFunc, shutdown ShutdownFunc) (*Server, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -58,7 +64,7 @@ func New(cfg *config.Config, reg *hosts.Registry, logger *slog.Logger,
 	}
 	return &Server{
 		cfg: cfg, registry: reg, logger: logger,
-		tmpl: tmpl, wake: wake, shutdown: shutdown, authn: authn,
+		tmpl: tmpl, wake: wake, shutdown: shutdown, authn: authn, events: evts,
 	}, nil
 }
 
@@ -80,12 +86,25 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /login", s.handleLoginPost)
 	mux.HandleFunc("POST /logout", s.handleLogout)
 
-	// Everything else requires a valid session (when auth is enabled).
+	// Browser routes — cookie auth only.
 	mux.Handle("GET /{$}", s.requireAuth(http.HandlerFunc(s.handleIndex)))
 	mux.Handle("GET /events", s.requireAuth(http.HandlerFunc(s.handleEvents)))
 	mux.Handle("GET /hosts/{name}", s.requireAuth(http.HandlerFunc(s.handleHostCard)))
 	mux.Handle("POST /hosts/{name}/wake", s.requireAuth(http.HandlerFunc(s.handleWake)))
 	mux.Handle("POST /hosts/{name}/shutdown", s.requireAuth(http.HandlerFunc(s.handleShutdown)))
+
+	// JSON API — bearer or cookie auth.
+	// The spec itself is unauthenticated so agents can discover the API
+	// before they're trusted enough to call it.
+	mux.HandleFunc("GET /api/v1/openapi.json", s.handleOpenAPISpec)
+
+	mux.Handle("GET /api/v1/whoami", s.requireAPIAuth(http.HandlerFunc(s.handleAPIWhoami)))
+	mux.Handle("GET /api/v1/hosts", s.requireAPIAuth(http.HandlerFunc(s.handleAPIHostList)))
+	mux.Handle("GET /api/v1/hosts/{name}", s.requireAPIAuth(http.HandlerFunc(s.handleAPIHost)))
+	mux.Handle("POST /api/v1/hosts/{name}/wake", s.requireAPIAuth(http.HandlerFunc(s.handleAPIWake)))
+	mux.Handle("POST /api/v1/hosts/{name}/shutdown", s.requireAPIAuth(http.HandlerFunc(s.handleAPIShutdown)))
+	mux.Handle("GET /api/v1/events", s.requireAPIAuth(http.HandlerFunc(s.handleAPIEvents)))
+	mux.Handle("GET /api/v1/events/stream", s.requireAPIAuth(http.HandlerFunc(s.handleAPIEventsStream)))
 
 	return s.logging(mux)
 }
@@ -155,17 +174,25 @@ func (s *Server) listener() (net.Listener, func(), error) {
 	}
 }
 
-// canDo checks whether the request's authenticated user is permitted to take
-// action on hostName. When auth is disabled, all requests are allowed.
+// handleOpenAPISpec serves the bundled spec. Cached aggressively since it's
+// baked into the binary.
+func (s *Server) handleOpenAPISpec(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	_, _ = w.Write(openapiSpec)
+}
+
+// canDo checks whether the request's authenticated principal is permitted
+// to take action on hostName. When auth is disabled, all requests are allowed.
 func (s *Server) canDo(r *http.Request, hostName, action string) bool {
 	if !s.cfg.Auth.Enabled {
 		return true
 	}
-	user := userFromContext(r.Context())
-	if user == "" {
+	p := principalFromContext(r.Context())
+	if p.Name == "" {
 		return false
 	}
-	return s.cfg.UserCan(user, hostName, action)
+	return s.cfg.PrincipalCan(p, hostName, action)
 }
 
 // logging emits one structured line per request with method, path, status,

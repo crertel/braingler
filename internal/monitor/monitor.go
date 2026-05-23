@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/crertel/braingler/internal/config"
+	"github.com/crertel/braingler/internal/events"
 	"github.com/crertel/braingler/internal/hosts"
 	"github.com/crertel/braingler/internal/sshx"
 )
@@ -17,6 +18,7 @@ type Monitor struct {
 	cfg      *config.Config
 	registry *hosts.Registry
 	logger   *slog.Logger
+	events   *events.Log // optional; nil means "don't record"
 }
 
 func New(cfg *config.Config, reg *hosts.Registry, logger *slog.Logger) *Monitor {
@@ -24,6 +26,14 @@ func New(cfg *config.Config, reg *hosts.Registry, logger *slog.Logger) *Monitor 
 		logger = slog.Default()
 	}
 	return &Monitor{cfg: cfg, registry: reg, logger: logger}
+}
+
+// WithEventLog attaches an event log so the monitor records state transitions
+// alongside its slog output. Safe to leave unset (nil) for tests / minimal
+// runs.
+func (m *Monitor) WithEventLog(l *events.Log) *Monitor {
+	m.events = l
+	return m
 }
 
 // Run blocks until ctx is canceled, polling every host on its own schedule.
@@ -88,6 +98,15 @@ func (m *Monitor) checkOnce(ctx context.Context, h *config.Host, tick int, log *
 	})
 	if cur, _ := m.registry.Get(h.Name); cur.Reachable != prev {
 		log.Info("state change", "from", prev.String(), "to", cur.Reachable.String(), "err", cur.LastErr)
+		if m.events != nil {
+			m.events.Append(events.Event{
+				Host:  h.Name,
+				Kind:  events.KindStateChange,
+				From:  prev.String(),
+				To:    cur.Reachable.String(),
+				Error: cur.LastErr,
+			})
+		}
 	}
 
 	// 2) SSH checks. Skip unless host is reachable.
