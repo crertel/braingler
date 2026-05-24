@@ -24,10 +24,16 @@
       </section>
     {{else}}
       <section class="card">
-        <h2>One-time setup per host</h2>
-        <p class="muted">Apply these on every host you want braingler to manage. NixOS
-          users can drop in the module; everyone else uses the generic sshd_config
-          snippet. The "sign-host-key" step at the bottom only matters if you've set
+        <h2>One-time setup</h2>
+        <p class="muted">There are three layers here:</p>
+        <ul class="muted">
+          <li><strong>Global</strong> — the CA pubkeys (below). Nothing to install; just referenced.</li>
+          <li><strong>Per-fleet</strong> — the module file or sshd_config block. Drop it in once;
+            it's the same content on every host.</li>
+          <li><strong>Per-host</strong> — the <code>configuration.nix</code> import (with the host's
+            signed cert) or the <code>HostCertificate</code> line. Different on each box.</li>
+        </ul>
+        <p class="muted">The signing checklist at the bottom only matters if you've set
           <code>ssh_ca.host_ca_key_file</code>.</p>
 
         <dl class="fingerprints">
@@ -46,16 +52,22 @@
 
       <section class="card">
         <h3>Per-host signing checklist</h3>
+        {{if .HostCAFingerprint}}
+          <p class="muted">For each host below, produce a signed cert on the braingler box and
+            install it via one of the two paths shown in the snippets above (sshd_config <code>HostCertificate</code>,
+            or NixOS <code>services.braingler-ssh.hostCert</code>).</p>
+        {{end}}
         <ol>
           {{range .Hosts}}
             <li>
               <strong>{{.Name}}</strong> ({{.Hostname}})
               {{if $.HostCAFingerprint}}
-                — sign host key with:
+                — sign:
                 <pre class="copy">ssh root@{{.Hostname}} cat /etc/ssh/ssh_host_ed25519_key.pub \
-  | braingler sign-host-key --config {{$.ConfigPath}} {{.Name}} \
-  | ssh root@{{.Hostname}} 'tee /etc/ssh/ssh_host_ed25519_key-cert.pub >/dev/null \
-     && systemctl reload sshd'</pre>
+  | braingler sign-host-key --config {{$.ConfigPath}} {{.Name}} > {{.Name}}-cert.pub</pre>
+                <p class="muted" style="margin: 0.25rem 0 0;">Then either
+                  <code>scp {{.Name}}-cert.pub root@{{.Hostname}}:/etc/ssh/ssh_host_ed25519_key-cert.pub &amp;&amp; ssh root@{{.Hostname}} systemctl reload sshd</code>,
+                  or move it under <code>/etc/nixos/</code> and rebuild.</p>
               {{else}}
                 — no host CA configured; nothing to sign on this side.
               {{end}}
