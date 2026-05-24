@@ -15,7 +15,7 @@ func newTestAuth(t *testing.T, users []config.User) *Authenticator {
 	t.Helper()
 	cfg := &config.Config{Auth: config.Auth{Enabled: true, Users: users}}
 	keyPath := filepath.Join(t.TempDir(), "cookie.key")
-	a, err := New(cfg, keyPath)
+	a, err := New(config.NewPointer(cfg), keyPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,13 +109,13 @@ func TestNoCookieReturnsEmpty(t *testing.T) {
 
 func TestKeyPersistsAcrossLoads(t *testing.T) {
 	keyPath := filepath.Join(t.TempDir(), "cookie.key")
-	cfg := &config.Config{Auth: config.Auth{Enabled: true}}
+	cfgPtr := config.NewPointer(&config.Config{Auth: config.Auth{Enabled: true}})
 
-	a1, err := New(cfg, keyPath)
+	a1, err := New(cfgPtr, keyPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	a2, err := New(cfg, keyPath) // should reuse the file written by a1
+	a2, err := New(cfgPtr, keyPath) // should reuse the file written by a1
 	if err != nil {
 		t.Fatal(err)
 	}

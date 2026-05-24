@@ -18,6 +18,7 @@ var declaredAPIPaths = map[string][]string{
 	"/api/v1/hosts/{name}":             {"GET"},
 	"/api/v1/hosts/{name}/wake":        {"POST"},
 	"/api/v1/hosts/{name}/shutdown":    {"POST"},
+	"/api/v1/hosts/{name}/ssh-cert":    {"POST"},
 	"/api/v1/events":                   {"GET"},
 	"/api/v1/events/stream":            {"GET"},
 }

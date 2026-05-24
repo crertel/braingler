@@ -1,0 +1,70 @@
+{{define "ssh_setup.html"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>braingler · CA bootstrap</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="page">
+  <header class="top">
+    <h1>braingler · host bootstrap</h1>
+    <nav class="top-nav">
+      <a href="/">← dashboard</a>
+      {{if .ShowSSHCert}}<a href="/ssh-cert">SSH cert</a>{{end}}
+    </nav>
+  </header>
+
+  <main class="page-body">
+    {{if not .Enabled}}
+      <section class="card">
+        <h2>SSH CA is disabled</h2>
+        <p class="muted">Set <code>ssh_ca.enabled</code> to <code>true</code> in
+          braingler's config to enable certificate-based access.</p>
+      </section>
+    {{else}}
+      <section class="card">
+        <h2>One-time setup per host</h2>
+        <p class="muted">Apply these on every host you want braingler to manage. NixOS
+          users can drop in the module; everyone else uses the generic sshd_config
+          snippet. The "sign-host-key" step at the bottom only matters if you've set
+          <code>ssh_ca.host_ca_key_file</code>.</p>
+
+        <dl class="fingerprints">
+          <dt>User CA fingerprint</dt><dd><code>{{.UserCAFingerprint}}</code></dd>
+          {{if .HostCAFingerprint}}<dt>Host CA fingerprint</dt><dd><code>{{.HostCAFingerprint}}</code></dd>{{end}}
+        </dl>
+      </section>
+
+      {{range .Snippets}}
+        <section class="card">
+          <h3>{{.Label}}</h3>
+          {{if .Filename}}<p class="muted">Suggested filename: <code>{{.Filename}}</code></p>{{end}}
+          <pre class="copy">{{.Body}}</pre>
+        </section>
+      {{end}}
+
+      <section class="card">
+        <h3>Per-host signing checklist</h3>
+        <ol>
+          {{range .Hosts}}
+            <li>
+              <strong>{{.Name}}</strong> ({{.Hostname}})
+              {{if $.HostCAFingerprint}}
+                — sign host key with:
+                <pre class="copy">ssh root@{{.Hostname}} cat /etc/ssh/ssh_host_ed25519_key.pub \
+  | braingler sign-host-key --config {{$.ConfigPath}} {{.Name}} \
+  | ssh root@{{.Hostname}} 'tee /etc/ssh/ssh_host_ed25519_key-cert.pub >/dev/null \
+     && systemctl reload sshd'</pre>
+              {{else}}
+                — no host CA configured; nothing to sign on this side.
+              {{end}}
+            </li>
+          {{end}}
+        </ol>
+      </section>
+    {{end}}
+  </main>
+</body>
+</html>
+{{end}}

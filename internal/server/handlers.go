@@ -13,22 +13,30 @@ import (
 
 // handleIndex renders the full dashboard.
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	views := make([]hostView, 0, len(s.cfg.Hosts))
-	for i := range s.cfg.Hosts {
-		h := &s.cfg.Hosts[i]
+	views := make([]hostView, 0, len(s.cfg().Hosts))
+	for i := range s.cfg().Hosts {
+		h := &s.cfg().Hosts[i]
 		if !s.canDo(r, h.Name, config.ActionStatus) {
 			continue
 		}
 		st, _ := s.registry.Get(h.Name)
-		views = append(views, newHostView(h, st, s.cfg.PollIntervalSeconds,
+		views = append(views, newHostView(h, st, s.cfg().PollIntervalSeconds,
 			s.canDo(r, h.Name, config.ActionWake),
 			s.canDo(r, h.Name, config.ActionShutdown)))
 	}
 
+	// Nav links: show whenever the SSH CA feature is on at the server level.
+	// Per-action permission gating lives on the linked pages themselves, so a
+	// user without perms still sees the links and gets a clear "not allowed"
+	// view rather than being silently hidden from the feature.
+	showCALinks := s.userCA != nil
+
 	data := map[string]any{
-		"Hosts":       views,
-		"HostCount":   len(views),
-		"PollSeconds": s.cfg.PollIntervalSeconds,
+		"Hosts":           views,
+		"HostCount":       len(views),
+		"PollSeconds":     s.cfg().PollIntervalSeconds,
+		"ShowSSHCert":     showCALinks,
+		"ShowCABootstrap": showCALinks,
 	}
 	s.render(w, "index.html", data)
 }
@@ -37,20 +45,20 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 // on every poll tick.
 func (s *Server) handleHostCard(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	h := s.cfg.HostByName(name)
+	h := s.cfg().HostByName(name)
 	if h == nil || !s.canDo(r, name, config.ActionStatus) {
 		http.NotFound(w, r)
 		return
 	}
 	st, _ := s.registry.Get(name)
-	v := newHostView(h, st, s.cfg.PollIntervalSeconds,
+	v := newHostView(h, st, s.cfg().PollIntervalSeconds,
 		s.canDo(r, name, config.ActionWake),
 		s.canDo(r, name, config.ActionShutdown))
 	s.render(w, "host_card.html", v)
 }
 
 func (s *Server) handleWake(w http.ResponseWriter, r *http.Request) {
-	h := s.cfg.HostByName(r.PathValue("name"))
+	h := s.cfg().HostByName(r.PathValue("name"))
 	if h == nil || !s.canDo(r, h.Name, config.ActionWake) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
@@ -67,14 +75,14 @@ func (s *Server) handleWake(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
-	h := s.cfg.HostByName(r.PathValue("name"))
+	h := s.cfg().HostByName(r.PathValue("name"))
 	if h == nil || !s.canDo(r, h.Name, config.ActionShutdown) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	if err := s.shutdown(ctx, h, s.cfg.EffectiveSSH(h)); err != nil {
+	if err := s.shutdown(ctx, h, s.cfg().EffectiveSSH(h)); err != nil {
 		s.logger.Warn("shutdown failed", "host", h.Name, "err", err)
 		http.Error(w, "shutdown failed: "+err.Error(), http.StatusInternalServerError)
 		return

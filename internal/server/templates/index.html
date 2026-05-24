@@ -11,7 +11,11 @@
 <body>
   <header class="top">
     <h1>braingler</h1>
-    <span class="sub">{{.HostCount}} host{{if ne .HostCount 1}}s{{end}}</span>
+    <nav class="top-nav">
+      {{if .ShowSSHCert}}<a href="/ssh-cert">SSH cert</a>{{end}}
+      {{if .ShowCABootstrap}}<a href="/ssh-setup">Host setup</a>{{end}}
+      <span class="sub">{{.HostCount}} host{{if ne .HostCount 1}}s{{end}}</span>
+    </nav>
   </header>
   <main class="hosts" hx-ext="sse" sse-connect="/events">
     {{range .Hosts}}{{template "host_card.html" .}}{{end}}

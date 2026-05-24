@@ -1,0 +1,67 @@
+{{define "ssh_cert.html"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>braingler · request SSH cert</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="page">
+  <header class="top">
+    <h1>braingler · SSH certificate</h1>
+    <nav class="top-nav">
+      <a href="/">← dashboard</a>
+      {{if .ShowCABootstrap}}<a href="/ssh-setup">Host setup</a>{{end}}
+    </nav>
+  </header>
+
+  <main class="page-body">
+    {{if .Result}}
+      <section class="card">
+        <h2>Your certificate</h2>
+        <p class="muted">Valid until <strong>{{.Result.ExpiresAt}}</strong>
+          for principal <code>{{.Result.Principal}}</code> on host
+          <code>{{.Result.HostName}}</code>.</p>
+
+        <h3>1. Save the certificate</h3>
+        <p>Write this to <code>~/.ssh/{{.Result.SuggestedFilename}}</code>:</p>
+        <pre class="copy">{{.Result.Certificate}}</pre>
+
+        <h3>2. Wire it into your SSH client</h3>
+        <p>Add to <code>~/.ssh/config</code>:</p>
+        <pre class="copy">{{.Result.SSHConfigSnippet}}</pre>
+
+        <p class="muted">Then <code>ssh {{.Result.HostName}}</code> just works (no further setup).
+          The cert expires; come back here to request another.</p>
+
+        <p><a class="btn" href="/ssh-cert">Mint another</a></p>
+      </section>
+    {{else}}
+      <section class="card">
+        <h2>Request an SSH certificate</h2>
+        <p class="muted">Paste your SSH <em>public</em> key. braingler will sign a short-lived
+          certificate that any host trusting this CA will accept — no per-host key wrangling.</p>
+
+        {{if .Error}}<div class="err">{{.Error}}</div>{{end}}
+
+        <form method="post" action="/ssh-cert">
+          <label>Host
+            <select name="host" required>
+              {{range .Hosts}}<option value="{{.}}"{{if eq . $.SelectedHost}} selected{{end}}>{{.}}</option>{{end}}
+            </select>
+          </label>
+          <label>Principal (Unix username you'll log in as)
+            <input name="principal" required value="{{.DefaultPrincipal}}">
+          </label>
+          <label>Your SSH public key (one line, starts with <code>ssh-ed25519</code> / <code>ssh-rsa</code>)
+            <textarea name="public_key" rows="4" required
+                      placeholder="ssh-ed25519 AAAA... your-comment">{{.SubmittedKey}}</textarea>
+          </label>
+          <button type="submit">Sign</button>
+        </form>
+      </section>
+    {{end}}
+  </main>
+</body>
+</html>
+{{end}}

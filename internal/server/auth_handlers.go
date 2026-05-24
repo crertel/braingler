@@ -8,7 +8,7 @@ import (
 
 func (s *Server) handleLoginGet(w http.ResponseWriter, r *http.Request) {
 	// Already signed in? Bounce back to the dashboard.
-	if s.cfg.Auth.Enabled && s.authn != nil && s.authn.UserFromRequest(r) != "" {
+	if s.cfg().Auth.Enabled && s.authn != nil && s.authn.UserFromRequest(r) != "" {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
@@ -18,7 +18,7 @@ func (s *Server) handleLoginGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
-	if !s.cfg.Auth.Enabled || s.authn == nil {
+	if !s.cfg().Auth.Enabled || s.authn == nil {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}

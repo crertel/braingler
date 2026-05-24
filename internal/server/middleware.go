@@ -32,7 +32,7 @@ func (s *Server) resolveCookie(r *http.Request) (config.Principal, bool) {
 	if username == "" {
 		return config.Principal{}, false
 	}
-	u := s.cfg.LookupUser(username)
+	u := s.cfg().LookupUser(username)
 	if u == nil {
 		// Cookie valid for a username that's no longer in config — treat
 		// as unauthenticated and let the user log in again.
@@ -50,7 +50,7 @@ func (s *Server) resolveBearer(r *http.Request) (config.Principal, bool) {
 	if tok == "" {
 		return config.Principal{}, false
 	}
-	rec, err := auth.VerifyToken(s.cfg, tok)
+	rec, err := auth.VerifyToken(s.cfg(), tok)
 	if err != nil {
 		return config.Principal{}, false
 	}
@@ -63,7 +63,7 @@ func (s *Server) resolveBearer(r *http.Request) (config.Principal, bool) {
 // accepted here; unauthenticated requests get redirected to /login.
 func (s *Server) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !s.cfg.Auth.Enabled {
+		if !s.cfg().Auth.Enabled {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -82,7 +82,7 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 // HTML redirects on the API surface.
 func (s *Server) requireAPIAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !s.cfg.Auth.Enabled {
+		if !s.cfg().Auth.Enabled {
 			next.ServeHTTP(w, r)
 			return
 		}

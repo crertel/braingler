@@ -15,18 +15,22 @@ import (
 )
 
 type Monitor struct {
-	cfg      *config.Config
+	cfgPtr   *config.Pointer
 	registry *hosts.Registry
 	logger   *slog.Logger
 	events   *events.Log // optional; nil means "don't record"
+	sshMgr   *sshx.Manager
 }
 
-func New(cfg *config.Config, reg *hosts.Registry, logger *slog.Logger) *Monitor {
+func New(cfgPtr *config.Pointer, reg *hosts.Registry, logger *slog.Logger, mgr *sshx.Manager) *Monitor {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Monitor{cfg: cfg, registry: reg, logger: logger}
+	return &Monitor{cfgPtr: cfgPtr, registry: reg, logger: logger, sshMgr: mgr}
 }
+
+// cfg loads the current config snapshot. Read-only.
+func (m *Monitor) cfg() *config.Config { return m.cfgPtr.Load() }
 
 // WithEventLog attaches an event log so the monitor records state transitions
 // alongside its slog output. Safe to leave unset (nil) for tests / minimal
@@ -38,28 +42,38 @@ func (m *Monitor) WithEventLog(l *events.Log) *Monitor {
 
 // Run blocks until ctx is canceled, polling every host on its own schedule.
 func (m *Monitor) Run(ctx context.Context) {
-	for i := range m.cfg.Hosts {
-		m.registry.Register(m.cfg.Hosts[i].Name)
+	c := m.cfg()
+	for i := range c.Hosts {
+		m.registry.Register(c.Hosts[i].Name)
 	}
 
 	var wg sync.WaitGroup
-	for i := range m.cfg.Hosts {
-		h := &m.cfg.Hosts[i]
-		wg.Go(func() { m.runHost(ctx, h) })
+	for i := range c.Hosts {
+		hostName := c.Hosts[i].Name
+		wg.Go(func() { m.runHost(ctx, hostName) })
 	}
 	wg.Wait()
 }
 
-func (m *Monitor) runHost(ctx context.Context, h *config.Host) {
-	interval := time.Duration(m.cfg.PollIntervalSeconds) * time.Second
-	log := m.logger.With("host", h.Name)
+func (m *Monitor) runHost(ctx context.Context, hostName string) {
+	log := m.logger.With("host", hostName)
 
 	// tick counts checkOnce invocations starting at 1, so a check with
 	// `every: N` first runs on tick N and every N ticks thereafter.
 	tick := 0
 	for {
 		tick++
+		// Re-resolve from current config every iteration so MAC, SSH,
+		// check toggles, and the poll interval pick up live edits.
+		c := m.cfg()
+		h := c.HostByName(hostName)
+		if h == nil {
+			// Host was removed since we were spawned but before reconcile
+			// got to us — bail cleanly.
+			return
+		}
 		m.checkOnce(ctx, h, tick, log)
+		interval := time.Duration(c.PollIntervalSeconds) * time.Second
 		select {
 		case <-ctx.Done():
 			return
@@ -141,7 +155,7 @@ func dueSSHChecks(h *config.Host, tick int) []string {
 // Each check is independent: a failure of one is logged but doesn't abort
 // the others.
 func (m *Monitor) runSSHChecks(ctx context.Context, h *config.Host, todo []string, log *slog.Logger) {
-	cli, err := sshx.Dial(ctx, h.Hostname, m.cfg.EffectiveSSH(h))
+	cli, err := m.sshMgr.Dial(ctx, h)
 	if err != nil {
 		log.Warn("ssh dial failed", "err", err)
 		m.registry.Update(h.Name, func(s *hosts.Status) { s.LastErr = err.Error() })

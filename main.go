@@ -15,27 +15,33 @@ import (
 	"syscall"
 	"time"
 
+	"io"
+
 	"github.com/crertel/braingler/internal/auth"
 	"github.com/crertel/braingler/internal/config"
 	"github.com/crertel/braingler/internal/events"
 	"github.com/crertel/braingler/internal/hosts"
 	"github.com/crertel/braingler/internal/monitor"
 	"github.com/crertel/braingler/internal/server"
+	"github.com/crertel/braingler/internal/sshca"
 	"github.com/crertel/braingler/internal/sshx"
 	"github.com/crertel/braingler/internal/wol"
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/crypto/ssh"
 	"golang.org/x/term"
 )
 
 const usage = `braingler — Wake-on-LAN dashboard for homelab hosts
 
 Usage:
-  braingler serve        [--config PATH]                  Run the monitor + HTTP server.
-  braingler check        [--config PATH]                  Load and validate the config file.
-  braingler wake         [--config PATH] HOST             Send a Wake-on-LAN packet to HOST.
-  braingler shutdown     [--config PATH] HOST             Shut HOST down via SSH.
-  braingler hash-password                                 Read a password from stdin, print bcrypt hash.
-  braingler issue-token  --name NAME --groups G1,G2       Mint a new API bearer token.
+  braingler serve         [--config PATH]                  Run the monitor + HTTP server.
+  braingler check         [--config PATH]                  Load and validate the config file.
+  braingler wake          [--config PATH] HOST             Send a Wake-on-LAN packet to HOST.
+  braingler shutdown      [--config PATH] HOST             Shut HOST down via SSH.
+  braingler hash-password                                  Read a password from stdin, print bcrypt hash.
+  braingler issue-token   --name NAME --groups G1,G2       Mint a new API bearer token.
+  braingler ca-info       [--config PATH]                  Print CA pubkeys + sshd_config / NixOS setup.
+  braingler sign-host-key [--config PATH] HOST < HOSTKEY   Sign a host's pubkey, write cert to stdout.
   braingler version
 `
 
@@ -60,6 +66,10 @@ func main() {
 		os.Exit(runShutdown(os.Args[2:]))
 	case "issue-token":
 		os.Exit(runIssueToken(os.Args[2:]))
+	case "ca-info":
+		os.Exit(runCAInfo(os.Args[2:]))
+	case "sign-host-key":
+		os.Exit(runSignHostKey(os.Args[2:]))
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	default:
@@ -79,16 +89,40 @@ func runServe(args []string) int {
 		fmt.Fprintf(os.Stderr, "config invalid: %v\n", err)
 		return 1
 	}
+	cfgPtr := config.NewPointer(c)
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	reg := hosts.New()
 	evlog := events.New(1024)
-	mon := monitor.New(c, reg, logger).WithEventLog(evlog)
+
+	var userCA, hostCA *sshca.CA
+	if c.SSHCA.Enabled {
+		userCA, err = sshca.Load(c.SSHCA.KeyFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ssh_ca: %v\n", err)
+			return 1
+		}
+		logger.Info("loaded user CA", "fingerprint", userCA.Fingerprint())
+		if c.SSHCA.HostCAKeyFile != "" {
+			hostCA, err = sshca.Load(c.SSHCA.HostCAKeyFile)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "ssh_ca host: %v\n", err)
+				return 1
+			}
+			logger.Info("loaded host CA", "fingerprint", hostCA.Fingerprint())
+		}
+	}
+	sshMgr, err := sshx.NewManager(cfgPtr, userCA, hostCA)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "sshx: %v\n", err)
+		return 1
+	}
+
+	mon := monitor.New(cfgPtr, reg, logger, sshMgr).WithEventLog(evlog)
 
 	var authn *auth.Authenticator
 	if c.Auth.Enabled {
-		var err error
-		authn, err = auth.New(c, auth.DefaultKeyPath())
+		authn, err = auth.New(cfgPtr, auth.DefaultKeyPath())
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "auth init: %v\n", err)
 			return 1
@@ -100,11 +134,11 @@ func runServe(args []string) int {
 		bcast := net.ParseIP(h.Broadcast)
 		return wol.Wake(mac, bcast)
 	}
-	shutdown := func(ctx context.Context, h *config.Host, sshCfg config.SSHConfig) error {
-		return sshx.Shutdown(ctx, h.Hostname, sshCfg)
+	shutdown := func(ctx context.Context, h *config.Host, _ config.SSHConfig) error {
+		return sshMgr.Shutdown(ctx, h)
 	}
 
-	srv, err := server.New(c, reg, logger, authn, evlog, wake, shutdown)
+	srv, err := server.New(cfgPtr, reg, logger, authn, evlog, userCA, hostCA, wake, shutdown)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "server init: %v\n", err)
 		return 1
@@ -204,6 +238,111 @@ func runCheck(args []string) int {
 		return 1
 	}
 	fmt.Printf("config OK: %d host(s), auth=%v\n", len(c.Hosts), c.Auth.Enabled)
+	return 0
+}
+
+// loadCAs opens the user CA and (optionally) the host CA from a config. If
+// host_ca_key_file is unset, returns userCA, nil. Caller-supplied error
+// strings are printed by the subcommand.
+func loadCAs(c *config.Config) (user *sshca.CA, host *sshca.CA, err error) {
+	if !c.SSHCA.Enabled {
+		return nil, nil, errors.New("ssh_ca.enabled is false in config")
+	}
+	user, err = sshca.Load(c.SSHCA.KeyFile)
+	if err != nil {
+		return nil, nil, err
+	}
+	if c.SSHCA.HostCAKeyFile != "" {
+		host, err = sshca.Load(c.SSHCA.HostCAKeyFile)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	return user, host, nil
+}
+
+func runCAInfo(args []string) int {
+	c, _, code := loadConfigFromArgs("ca-info", args)
+	if c == nil {
+		return code
+	}
+	user, host, err := loadCAs(c)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ca-info: %v\n", err)
+		return 1
+	}
+	fmt.Printf("User CA: %s\n", user.Fingerprint())
+	if host != nil {
+		fmt.Printf("Host CA: %s\n", host.Fingerprint())
+	} else {
+		fmt.Println("Host CA: (none configured — set ssh_ca.host_ca_key_file to enable)")
+	}
+	fmt.Println()
+
+	maintUser := c.SSHDefaults.User
+	if maintUser == "" {
+		maintUser = "braingler-maint"
+	}
+	for _, s := range sshca.SetupSnippets(user, host, maintUser) {
+		fmt.Println("---", s.Label, "---")
+		fmt.Println()
+		fmt.Println(s.Body)
+	}
+	return 0
+}
+
+func runSignHostKey(args []string) int {
+	fs := flag.NewFlagSet("sign-host-key", flag.ContinueOnError)
+	cfgPath := fs.String("config", "config.json", "path to config file")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	rest := fs.Args()
+	if len(rest) != 1 {
+		fmt.Fprintln(os.Stderr, "sign-host-key: expected exactly one HOST argument")
+		return 2
+	}
+	hostName := rest[0]
+
+	c, err := config.Load(*cfgPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "config invalid: %v\n", err)
+		return 1
+	}
+	_, hostCA, err := loadCAs(c)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "sign-host-key: %v\n", err)
+		return 1
+	}
+	if hostCA == nil {
+		fmt.Fprintln(os.Stderr, "sign-host-key: ssh_ca.host_ca_key_file is not set")
+		return 1
+	}
+
+	pubBytes, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "sign-host-key: read stdin: %v\n", err)
+		return 1
+	}
+	pub, _, _, _, err := ssh.ParseAuthorizedKey(pubBytes)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "sign-host-key: parse pubkey: %v\n", err)
+		return 1
+	}
+
+	principals := []string{hostName}
+	if h := c.HostByName(hostName); h != nil && h.Hostname != "" && h.Hostname != hostName {
+		principals = append(principals, h.Hostname)
+	}
+	cert, err := hostCA.SignHostCert(pub, sshca.HostCertOptions{
+		KeyID:           hostName,
+		ValidPrincipals: principals,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "sign-host-key: %v\n", err)
+		return 1
+	}
+	fmt.Println(sshca.MarshalCertificate(cert, "host="+hostName))
 	return 0
 }
 

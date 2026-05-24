@@ -102,6 +102,31 @@
         }
       }
     },
+    "/hosts/{name}/ssh-cert": {
+      "parameters": [
+        { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "post": {
+        "summary": "Mint a short-lived SSH user certificate for one action on this host.",
+        "description": "Caller must have both ssh-cert and the requested action on the host. The cert is bound to the action via force-command and to the host's maintenance user via the cert principal. If the request omits public_key, the server generates an ephemeral keypair and returns both halves.",
+        "requestBody": {
+          "required": false,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SSHCertRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Certificate issued.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SSHCertResponse" } } }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/Error" },
+          "503": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
     "/events": {
       "get": {
         "summary": "Paged event log: state transitions and action attempts.",
@@ -287,6 +312,28 @@
           "host":      { "type": "string" },
           "action":    { "type": "string", "enum": ["wake", "shutdown"] },
           "status":    { "type": "string", "enum": ["submitted"] }
+        }
+      },
+      "SSHCertRequest": {
+        "type": "object",
+        "properties": {
+          "action":      { "type": "string", "enum": ["shutdown"], "description": "Action the cert authorizes. Defaults to \"shutdown\"." },
+          "public_key":  { "type": "string", "description": "OpenSSH authorized-keys-format public key. If omitted, the server generates an ephemeral keypair and includes the private key in the response." },
+          "ttl_seconds": { "type": "integer", "minimum": 1, "description": "Requested lifetime; clamped to ssh_ca.agent_ttl_seconds." }
+        }
+      },
+      "SSHCertResponse": {
+        "type": "object",
+        "required": ["certificate", "public_key", "principal", "force_command", "expires_at", "action_id", "ca_fingerprint"],
+        "properties": {
+          "certificate":    { "type": "string", "description": "OpenSSH certificate blob, ready to drop into ~/.ssh as a CertificateFile." },
+          "public_key":     { "type": "string", "description": "The public key the cert was signed against." },
+          "private_key":    { "type": "string", "description": "PEM-encoded private key. ONLY present when the caller did not supply a public_key. Treat as a secret; the server never sees it again." },
+          "principal":      { "type": "string", "description": "Unix username the cert is valid for on the target host." },
+          "force_command":  { "type": "string", "description": "The exact command sshd will allow this cert to run." },
+          "expires_at":     { "type": "string", "format": "date-time" },
+          "action_id":      { "type": "string", "description": "Correlation ID matching the cert's key_id." },
+          "ca_fingerprint": { "type": "string", "description": "SHA-256 fingerprint of the signing CA, for client-side trust pinning." }
         }
       },
       "EventsPage": {

@@ -79,10 +79,10 @@ type apiHostList struct {
 // --- handlers ---------------------------------------------------------------
 
 func (s *Server) handleAPIWhoami(w http.ResponseWriter, r *http.Request) {
-	if !s.cfg.Auth.Enabled {
+	if !s.cfg().Auth.Enabled {
 		writeJSON(w, http.StatusOK, apiWhoami{
 			Name: "", Kind: "anonymous", AuthMode: "disabled",
-			Hosts: s.cfg.VisibleHosts(config.Principal{}),
+			Hosts: s.cfg().VisibleHosts(config.Principal{}),
 		})
 		return
 	}
@@ -93,14 +93,14 @@ func (s *Server) handleAPIWhoami(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, apiWhoami{
 		Name: p.Name, Kind: string(p.Kind), Groups: p.Groups,
-		Hosts: s.cfg.VisibleHosts(p), AuthMode: mode,
+		Hosts: s.cfg().VisibleHosts(p), AuthMode: mode,
 	})
 }
 
 func (s *Server) handleAPIHostList(w http.ResponseWriter, r *http.Request) {
-	hostsOut := make([]apiHost, 0, len(s.cfg.Hosts))
-	for i := range s.cfg.Hosts {
-		h := &s.cfg.Hosts[i]
+	hostsOut := make([]apiHost, 0, len(s.cfg().Hosts))
+	for i := range s.cfg().Hosts {
+		h := &s.cfg().Hosts[i]
 		if !s.canDo(r, h.Name, config.ActionStatus) {
 			continue
 		}
@@ -112,7 +112,7 @@ func (s *Server) handleAPIHostList(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAPIHost(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	h := s.cfg.HostByName(name)
+	h := s.cfg().HostByName(name)
 	if h == nil || !s.canDo(r, name, config.ActionStatus) {
 		writeAPIError(w, http.StatusNotFound, "host_not_found",
 			"no such host, or no permission to see it")

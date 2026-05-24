@@ -45,6 +45,14 @@ header.top {
 
 header.top h1 { font-size: 1.1rem; margin: 0; letter-spacing: 0.02em; }
 header.top .sub { color: var(--muted); font-size: 0.85rem; }
+nav.top-nav {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  font-size: 0.9rem;
+}
+nav.top-nav a { color: var(--accent); text-decoration: none; }
+nav.top-nav a:hover { text-decoration: underline; }
 
 main.hosts {
   display: grid;
@@ -206,3 +214,85 @@ main.login-card button {
   cursor: pointer;
 }
 main.login-card button:hover { background: var(--accent-hover); }
+
+body.page main.page-body {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+header.top a.nav {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.85rem;
+}
+header.top a.nav:hover { color: var(--accent); }
+section.card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.4rem 1.6rem;
+  margin-bottom: 1.2rem;
+}
+section.card h2 { margin-top: 0; }
+section.card h3 { font-size: 0.95rem; margin: 1rem 0 0.4rem; }
+section.card label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-bottom: 0.9rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+section.card input, section.card select, section.card textarea {
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+}
+section.card textarea { resize: vertical; }
+section.card button {
+  font: inherit;
+  padding: 0.55rem 1.1rem;
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent);
+  color: white;
+  cursor: pointer;
+}
+section.card button:hover { background: var(--accent-hover); }
+section.card pre.copy {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  overflow-x: auto;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.muted { color: var(--muted); font-size: 0.85rem; }
+.btn {
+  display: inline-block;
+  font: inherit;
+  padding: 0.45rem 0.9rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  color: var(--accent);
+  text-decoration: none;
+}
+.btn:hover { background: var(--accent); color: white; }
+
+dl.fingerprints {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 0.75rem;
+  font-size: 0.85rem;
+  margin: 0;
+}
+dl.fingerprints dt { color: var(--muted); }
+dl.fingerprints dd { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+ol li { margin-bottom: 0.8rem; }

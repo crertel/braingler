@@ -12,14 +12,17 @@ import (
 )
 
 const (
-	ActionStatus   = "status"
-	ActionWake     = "wake"
-	ActionShutdown = "shutdown"
-	ActionWildcard = "*"
+	ActionStatus       = "status"
+	ActionWake         = "wake"
+	ActionShutdown     = "shutdown"
+	ActionSSHCert      = "ssh-cert"
+	ActionCABootstrap  = "ca-bootstrap"
+	ActionWildcard     = "*"
 )
 
 var validActions = map[string]bool{
 	ActionStatus: true, ActionWake: true, ActionShutdown: true,
+	ActionSSHCert: true, ActionCABootstrap: true,
 }
 
 const (
@@ -39,9 +42,23 @@ type Config struct {
 	Listen              Listen           `json:"listen"`
 	PollIntervalSeconds int              `json:"poll_interval_seconds"`
 	SSHDefaults         SSHConfig        `json:"ssh_defaults"`
+	SSHCA               SSHCA            `json:"ssh_ca,omitempty"`
 	Auth                Auth             `json:"auth"`
 	Hosts               []Host           `json:"hosts"`
 	hostByName          map[string]*Host `json:"-"`
+}
+
+// SSHCA configures braingler's SSH certificate authority. When Enabled,
+// braingler signs short-lived user certs for itself, its agents, and any
+// human who asks via /ssh-cert. When HostCAKeyFile is set, braingler also
+// uses it to verify host certificates instead of trust-on-first-use.
+type SSHCA struct {
+	Enabled               bool   `json:"enabled"`
+	KeyFile               string `json:"key_file,omitempty"`
+	HostCAKeyFile         string `json:"host_ca_key_file,omitempty"`
+	MaintenanceTTLSeconds int    `json:"maintenance_ttl_seconds,omitempty"`
+	HumanTTLSeconds       int    `json:"human_ttl_seconds,omitempty"`
+	AgentTTLSeconds       int    `json:"agent_ttl_seconds,omitempty"`
 }
 
 type Listen struct {
@@ -101,13 +118,14 @@ type Principal struct {
 }
 
 type Host struct {
-	Name        string           `json:"name"`
-	DisplayName string           `json:"display_name,omitempty"`
-	Hostname    string           `json:"hostname"`
-	MAC         string           `json:"mac"`
-	Broadcast   string           `json:"broadcast"`
-	SSH         *SSHConfig       `json:"ssh,omitempty"`
-	Checks      map[string]Check `json:"checks"`
+	Name            string           `json:"name"`
+	DisplayName     string           `json:"display_name,omitempty"`
+	Hostname        string           `json:"hostname"`
+	MAC             string           `json:"mac"`
+	Broadcast       string           `json:"broadcast"`
+	MaintenanceUser string           `json:"maintenance_user,omitempty"` // overrides ssh_defaults.user for braingler's own SSH ops
+	SSH             *SSHConfig       `json:"ssh,omitempty"`
+	Checks          map[string]Check `json:"checks"`
 }
 
 type Check struct {
@@ -145,6 +163,17 @@ func (c *Config) applyDefaults() {
 		c.SSHDefaults.TimeoutSeconds = 5
 	}
 	c.SSHDefaults.KeyFile = expandHome(c.SSHDefaults.KeyFile)
+	if c.SSHCA.MaintenanceTTLSeconds == 0 {
+		c.SSHCA.MaintenanceTTLSeconds = 300
+	}
+	if c.SSHCA.HumanTTLSeconds == 0 {
+		c.SSHCA.HumanTTLSeconds = 86400
+	}
+	if c.SSHCA.AgentTTLSeconds == 0 {
+		c.SSHCA.AgentTTLSeconds = 300
+	}
+	c.SSHCA.KeyFile = expandHome(c.SSHCA.KeyFile)
+	c.SSHCA.HostCAKeyFile = expandHome(c.SSHCA.HostCAKeyFile)
 	for i := range c.Hosts {
 		h := &c.Hosts[i]
 		if h.DisplayName == "" {
@@ -174,6 +203,10 @@ func (c *Config) validate() error {
 
 	if c.PollIntervalSeconds < 1 {
 		errs = append(errs, fmt.Errorf("poll_interval_seconds: must be >= 1 (got %d)", c.PollIntervalSeconds))
+	}
+
+	if c.SSHCA.Enabled && c.SSHCA.KeyFile == "" {
+		errs = append(errs, errors.New("ssh_ca.enabled but key_file is empty"))
 	}
 
 	c.hostByName = map[string]*Host{}
@@ -294,6 +327,15 @@ func (c *Config) EffectiveSSH(h *Host) SSHConfig {
 		out.TimeoutSeconds = h.SSH.TimeoutSeconds
 	}
 	return out
+}
+
+// MaintenanceUser returns the username braingler should log in as for its own
+// SSH ops against h, preferring per-host override then ssh_defaults.user.
+func (c *Config) MaintenanceUser(h *Host) string {
+	if h.MaintenanceUser != "" {
+		return h.MaintenanceUser
+	}
+	return c.EffectiveSSH(h).User
 }
 
 // HostByName returns the host with the given name, or nil.

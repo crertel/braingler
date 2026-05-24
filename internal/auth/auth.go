@@ -35,27 +35,30 @@ const (
 // Authenticator owns the signing key and exposes the cookie-and-perm helpers
 // the HTTP layer needs. It is safe for concurrent use.
 type Authenticator struct {
-	cfg *config.Config
-	key []byte
-	ttl time.Duration
+	cfgPtr *config.Pointer
+	key    []byte
+	ttl    time.Duration
 }
 
 // New constructs an Authenticator, loading or generating the HMAC secret at
 // keyPath. The file is created with mode 0600 if it doesn't exist.
-func New(cfg *config.Config, keyPath string) (*Authenticator, error) {
+func New(cfgPtr *config.Pointer, keyPath string) (*Authenticator, error) {
 	key, err := loadOrCreateKey(keyPath)
 	if err != nil {
 		return nil, err
 	}
-	return &Authenticator{cfg: cfg, key: key, ttl: DefaultTTL}, nil
+	return &Authenticator{cfgPtr: cfgPtr, key: key, ttl: DefaultTTL}, nil
 }
+
+// cfg loads the current config snapshot. Read-only.
+func (a *Authenticator) cfg() *config.Config { return a.cfgPtr.Load() }
 
 // VerifyCredentials checks (username, password) against the config. It
 // returns the matched username and groups on success, or an error on
 // failure. The error is deliberately vague — we don't want to leak whether
 // the user existed.
 func (a *Authenticator) VerifyCredentials(username, password string) error {
-	for _, u := range a.cfg.Auth.Users {
+	for _, u := range a.cfg().Auth.Users {
 		if u.Username != username {
 			continue
 		}

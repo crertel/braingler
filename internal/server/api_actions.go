@@ -60,7 +60,7 @@ func (s *Server) handleAPIShutdown(w http.ResponseWriter, r *http.Request) {
 	actionID := newActionID()
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	if err := s.shutdown(ctx, h, s.cfg.EffectiveSSH(h)); err != nil {
+	if err := s.shutdown(ctx, h, s.cfg().EffectiveSSH(h)); err != nil {
 		s.logger.Warn("api shutdown failed", "host", h.Name, "err", err)
 		s.recordEvent(events.Event{Host: h.Name, Kind: events.KindShutdownFail,
 			Actor: actor, ActionID: actionID, Error: err.Error()})
@@ -87,7 +87,7 @@ func (s *Server) recordEvent(e events.Event) {
 // or 403 (host visible but action denied) on failure so agents can tell the
 // two apart and surface the right error to the user.
 func (s *Server) requireAPIHostPerm(w http.ResponseWriter, r *http.Request, action string) (*config.Host, bool) {
-	h := s.cfg.HostByName(r.PathValue("name"))
+	h := s.cfg().HostByName(r.PathValue("name"))
 	if h == nil {
 		writeAPIError(w, http.StatusNotFound, "host_not_found", "no such host")
 		return nil, false

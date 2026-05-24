@@ -1,0 +1,35 @@
+{
+  "listen": {"address": "127.0.0.1:8083"},
+  "poll_interval_seconds": 3,
+  "ssh_defaults": {
+    "user": "braingler-maint",
+    "key_file": "/dev/null"
+  },
+  "ssh_ca": {
+    "enabled": true,
+    "key_file": "/tmp/braingler-test/user_ca",
+    "host_ca_key_file": "/tmp/braingler-test/host_ca",
+    "agent_ttl_seconds": 300,
+    "human_ttl_seconds": 3600
+  },
+  "auth": {
+    "enabled": true,
+    "users": [
+      {"username": "admin", "password_hash": "$2a$04$0jEMp5aFR56HxzS7N4DRA.pbGrf4TliWKUZTjB5MW2h2Md0uDmIDW", "groups": ["admin"]}
+    ],
+    "api_tokens": [
+      {"name": "claude-shutdown", "token_hash": "sha256:ed95a49d2085acaa2895a98c01c737bd60944ec4d94651640c55d00654529ec0",
+       "groups": ["agent-shutdown"]}
+    ],
+    "groups": {
+      "admin":         {"hosts": ["*"], "actions": ["*"]},
+      "agent-shutdown": {"hosts": ["loopback"], "actions": ["status", "wake", "shutdown", "ssh-cert"]}
+    }
+  },
+  "hosts": [
+    {"name": "loopback", "hostname": "127.0.0.1", "mac": "02:00:00:00:00:01", "broadcast": "127.255.255.255",
+     "checks": {"ping": {"enabled": true}}},
+    {"name": "nowhere", "hostname": "192.0.2.123", "mac": "02:00:00:00:00:02", "broadcast": "192.0.2.255",
+     "checks": {"ping": {"enabled": true}}}
+  ]
+}

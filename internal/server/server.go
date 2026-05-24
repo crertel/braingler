@@ -23,6 +23,7 @@ import (
 	"github.com/crertel/braingler/internal/config"
 	"github.com/crertel/braingler/internal/events"
 	"github.com/crertel/braingler/internal/hosts"
+	"github.com/crertel/braingler/internal/sshca"
 )
 
 //go:embed templates/*.html
@@ -36,7 +37,7 @@ var openapiSpec []byte
 
 // Server bundles dependencies the handlers need. Construct via New.
 type Server struct {
-	cfg      *config.Config
+	cfgPtr   *config.Pointer
 	registry *hosts.Registry
 	logger   *slog.Logger
 	tmpl     *template.Template
@@ -44,7 +45,12 @@ type Server struct {
 	shutdown ShutdownFunc
 	authn    *auth.Authenticator // nil if auth is disabled in config
 	events   *events.Log         // nil disables the audit log
+	userCA   *sshca.CA           // nil if ssh_ca is disabled
+	hostCA   *sshca.CA           // nil if no host CA configured
 }
+
+// cfg loads the current config snapshot. Read-only.
+func (s *Server) cfg() *config.Config { return s.cfgPtr.Load() }
 
 // WakeFunc and ShutdownFunc are injected so the server doesn't import wol/sshx
 // directly — keeps the dependency graph one-way and makes the handlers
@@ -52,8 +58,9 @@ type Server struct {
 type WakeFunc func(ctx context.Context, h *config.Host) error
 type ShutdownFunc func(ctx context.Context, h *config.Host, cfg config.SSHConfig) error
 
-func New(cfg *config.Config, reg *hosts.Registry, logger *slog.Logger,
+func New(cfgPtr *config.Pointer, reg *hosts.Registry, logger *slog.Logger,
 	authn *auth.Authenticator, evts *events.Log,
+	userCA, hostCA *sshca.CA,
 	wake WakeFunc, shutdown ShutdownFunc) (*Server, error) {
 	if logger == nil {
 		logger = slog.Default()
@@ -63,8 +70,9 @@ func New(cfg *config.Config, reg *hosts.Registry, logger *slog.Logger,
 		return nil, fmt.Errorf("parse templates: %w", err)
 	}
 	return &Server{
-		cfg: cfg, registry: reg, logger: logger,
+		cfgPtr: cfgPtr, registry: reg, logger: logger,
 		tmpl: tmpl, wake: wake, shutdown: shutdown, authn: authn, events: evts,
+		userCA: userCA, hostCA: hostCA,
 	}, nil
 }
 
@@ -92,6 +100,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /hosts/{name}", s.requireAuth(http.HandlerFunc(s.handleHostCard)))
 	mux.Handle("POST /hosts/{name}/wake", s.requireAuth(http.HandlerFunc(s.handleWake)))
 	mux.Handle("POST /hosts/{name}/shutdown", s.requireAuth(http.HandlerFunc(s.handleShutdown)))
+	mux.Handle("GET /ssh-cert", s.requireAuth(http.HandlerFunc(s.handleSSHCertGet)))
+	mux.Handle("POST /ssh-cert", s.requireAuth(http.HandlerFunc(s.handleSSHCertPost)))
+	mux.Handle("GET /ssh-setup", s.requireAuth(http.HandlerFunc(s.handleSSHSetup)))
 
 	// JSON API — bearer or cookie auth.
 	// The spec itself is unauthenticated so agents can discover the API
@@ -103,6 +114,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/hosts/{name}", s.requireAPIAuth(http.HandlerFunc(s.handleAPIHost)))
 	mux.Handle("POST /api/v1/hosts/{name}/wake", s.requireAPIAuth(http.HandlerFunc(s.handleAPIWake)))
 	mux.Handle("POST /api/v1/hosts/{name}/shutdown", s.requireAPIAuth(http.HandlerFunc(s.handleAPIShutdown)))
+	mux.Handle("POST /api/v1/hosts/{name}/ssh-cert", s.requireAPIAuth(http.HandlerFunc(s.handleAPISSHCert)))
 	mux.Handle("GET /api/v1/events", s.requireAPIAuth(http.HandlerFunc(s.handleAPIEvents)))
 	mux.Handle("GET /api/v1/events/stream", s.requireAPIAuth(http.HandlerFunc(s.handleAPIEventsStream)))
 
@@ -141,8 +153,8 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 
 func (s *Server) listener() (net.Listener, func(), error) {
 	switch {
-	case s.cfg.Listen.Socket != "":
-		path := s.cfg.Listen.Socket
+	case s.cfg().Listen.Socket != "":
+		path := s.cfg().Listen.Socket
 		// A stale socket from a previous run will refuse to bind. Removing
 		// it is safe only if it's actually a socket — guard against the
 		// caller accidentally pointing at a real file.
@@ -169,7 +181,7 @@ func (s *Server) listener() (net.Listener, func(), error) {
 		}
 		return ln, func() { os.Remove(path) }, nil
 	default:
-		ln, err := net.Listen("tcp", s.cfg.Listen.Address)
+		ln, err := net.Listen("tcp", s.cfg().Listen.Address)
 		return ln, nil, err
 	}
 }
@@ -185,14 +197,14 @@ func (s *Server) handleOpenAPISpec(w http.ResponseWriter, _ *http.Request) {
 // canDo checks whether the request's authenticated principal is permitted
 // to take action on hostName. When auth is disabled, all requests are allowed.
 func (s *Server) canDo(r *http.Request, hostName, action string) bool {
-	if !s.cfg.Auth.Enabled {
+	if !s.cfg().Auth.Enabled {
 		return true
 	}
 	p := principalFromContext(r.Context())
 	if p.Name == "" {
 		return false
 	}
-	return s.cfg.PrincipalCan(p, hostName, action)
+	return s.cfg().PrincipalCan(p, hostName, action)
 }
 
 // logging emits one structured line per request with method, path, status,

@@ -35,8 +35,8 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 
 	// Initial snapshot of every visible host so a fresh connection renders
 	// correctly without waiting for the next state change.
-	for i := range s.cfg.Hosts {
-		host := &s.cfg.Hosts[i]
+	for i := range s.cfg().Hosts {
+		host := &s.cfg().Hosts[i]
 		if !s.canDo(r, host.Name, config.ActionStatus) {
 			continue
 		}
@@ -62,7 +62,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
-			host := s.cfg.HostByName(st.Name)
+			host := s.cfg().HostByName(st.Name)
 			if host == nil {
 				continue
 			}
@@ -81,7 +81,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 func (s *Server) writeHostEvent(w http.ResponseWriter, rc *http.ResponseController,
 	h *config.Host, st hosts.Status, r *http.Request) {
 	var buf bytes.Buffer
-	v := newHostView(h, st, s.cfg.PollIntervalSeconds,
+	v := newHostView(h, st, s.cfg().PollIntervalSeconds,
 		s.canDo(r, h.Name, config.ActionWake),
 		s.canDo(r, h.Name, config.ActionShutdown))
 	if err := s.tmpl.ExecuteTemplate(&buf, "host_card.html", v); err != nil {
