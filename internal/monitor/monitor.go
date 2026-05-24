@@ -1,5 +1,7 @@
 // Package monitor runs the background poll loop and writes results into the
-// hosts.Registry. Each configured host gets its own goroutine.
+// hosts.Registry. Each configured host gets its own goroutine; the set of
+// goroutines is reconciled on demand so SIGHUP reloads can add or drop hosts
+// without restarting the process.
 package monitor
 
 import (
@@ -20,13 +22,21 @@ type Monitor struct {
 	logger   *slog.Logger
 	events   *events.Log // optional; nil means "don't record"
 	sshMgr   *sshx.Manager
+
+	mu        sync.Mutex
+	parentCtx context.Context
+	workers   map[string]context.CancelFunc // hostName -> cancel
+	stopped   bool
 }
 
 func New(cfgPtr *config.Pointer, reg *hosts.Registry, logger *slog.Logger, mgr *sshx.Manager) *Monitor {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Monitor{cfgPtr: cfgPtr, registry: reg, logger: logger, sshMgr: mgr}
+	return &Monitor{
+		cfgPtr: cfgPtr, registry: reg, logger: logger, sshMgr: mgr,
+		workers: map[string]context.CancelFunc{},
+	}
 }
 
 // cfg loads the current config snapshot. Read-only.
@@ -40,19 +50,67 @@ func (m *Monitor) WithEventLog(l *events.Log) *Monitor {
 	return m
 }
 
-// Run blocks until ctx is canceled, polling every host on its own schedule.
+// Run brings up workers for the currently-configured hosts and blocks until
+// ctx is canceled. Workers can be added or dropped at any point via Reload.
 func (m *Monitor) Run(ctx context.Context) {
-	c := m.cfg()
-	for i := range c.Hosts {
-		m.registry.Register(c.Hosts[i].Name)
+	m.mu.Lock()
+	m.parentCtx = ctx
+	m.mu.Unlock()
+	m.reconcile()
+
+	<-ctx.Done()
+
+	// Wait for all per-host workers to drain before returning.
+	m.mu.Lock()
+	for _, cancel := range m.workers {
+		cancel()
+	}
+	m.stopped = true
+	m.mu.Unlock()
+}
+
+// Reload diffs the configured host set against currently-running workers,
+// starting goroutines for new hosts and canceling ones that have disappeared.
+// Hosts that exist in both keep their worker — and pick up edits naturally
+// because runHost re-reads its host from the current config each tick.
+func (m *Monitor) Reload() {
+	m.reconcile()
+}
+
+func (m *Monitor) reconcile() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.stopped || m.parentCtx == nil {
+		return
 	}
 
-	var wg sync.WaitGroup
+	c := m.cfg()
+	wanted := make(map[string]struct{}, len(c.Hosts))
 	for i := range c.Hosts {
-		hostName := c.Hosts[i].Name
-		wg.Go(func() { m.runHost(ctx, hostName) })
+		wanted[c.Hosts[i].Name] = struct{}{}
 	}
-	wg.Wait()
+
+	// Stop departed.
+	for name, cancel := range m.workers {
+		if _, keep := wanted[name]; !keep {
+			cancel()
+			delete(m.workers, name)
+			m.logger.Info("monitor stopped worker", "host", name)
+		}
+	}
+
+	// Start new.
+	for name := range wanted {
+		if _, exists := m.workers[name]; exists {
+			continue
+		}
+		m.registry.Register(name)
+		hostCtx, cancel := context.WithCancel(m.parentCtx)
+		m.workers[name] = cancel
+		hostName := name // pin for closure
+		go m.runHost(hostCtx, hostName)
+		m.logger.Info("monitor started worker", "host", hostName)
+	}
 }
 
 func (m *Monitor) runHost(ctx context.Context, hostName string) {

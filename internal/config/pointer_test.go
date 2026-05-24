@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"sync"
 	"testing"
 )
@@ -38,5 +39,52 @@ func TestPointerConcurrent(t *testing.T) {
 		}
 	})
 	wg.Wait()
+}
+
+func TestReloadCompatibleAllowsBenignChanges(t *testing.T) {
+	prev := &Config{
+		Listen:              Listen{Address: "127.0.0.1:8080"},
+		PollIntervalSeconds: 5,
+	}
+	next := &Config{
+		Listen:              Listen{Address: "127.0.0.1:8080"},
+		PollIntervalSeconds: 9, // changed
+	}
+	if err := ReloadCompatible(prev, next); err != nil {
+		t.Errorf("benign change rejected: %v", err)
+	}
+}
+
+func TestReloadCompatibleRefusesListen(t *testing.T) {
+	prev := &Config{Listen: Listen{Address: "127.0.0.1:8080"}}
+	next := &Config{Listen: Listen{Address: "127.0.0.1:9090"}}
+	err := ReloadCompatible(prev, next)
+	if err == nil || !strings.Contains(err.Error(), "listen") {
+		t.Errorf("listen change should be refused, got: %v", err)
+	}
+}
+
+func TestReloadCompatibleRefusesSSHCAPaths(t *testing.T) {
+	prev := &Config{
+		Listen: Listen{Address: "x"},
+		SSHCA:  SSHCA{Enabled: true, KeyFile: "/a"},
+	}
+	next := &Config{
+		Listen: Listen{Address: "x"},
+		SSHCA:  SSHCA{Enabled: true, KeyFile: "/b"},
+	}
+	if err := ReloadCompatible(prev, next); err == nil ||
+		!strings.Contains(err.Error(), "ssh_ca.key_file") {
+		t.Errorf("ssh_ca.key_file change should be refused, got: %v", err)
+	}
+}
+
+func TestReloadCompatibleRefusesEnableToggle(t *testing.T) {
+	prev := &Config{Listen: Listen{Address: "x"}, SSHCA: SSHCA{Enabled: false}}
+	next := &Config{Listen: Listen{Address: "x"}, SSHCA: SSHCA{Enabled: true, KeyFile: "/a"}}
+	if err := ReloadCompatible(prev, next); err == nil ||
+		!strings.Contains(err.Error(), "ssh_ca.enabled") {
+		t.Errorf("ssh_ca.enabled toggle should be refused, got: %v", err)
+	}
 }
 

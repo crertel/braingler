@@ -147,6 +147,32 @@ func runServe(args []string) int {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
+	// SIGHUP reloads the config file in place. Errors (parse/validate or
+	// restart-only-field changes) are logged and the running config sticks.
+	hupCh := make(chan os.Signal, 1)
+	signal.Notify(hupCh, syscall.SIGHUP)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-hupCh:
+				next, err := config.Load(*path)
+				if err != nil {
+					logger.Error("SIGHUP: reload failed", "err", err)
+					continue
+				}
+				if err := config.ReloadCompatible(cfgPtr.Load(), next); err != nil {
+					logger.Error("SIGHUP: incompatible change, keeping old config", "err", err)
+					continue
+				}
+				cfgPtr.Store(next)
+				mon.Reload()
+				logger.Info("SIGHUP: reload applied", "hosts", len(next.Hosts))
+			}
+		}
+	}()
+
 	logger.Info("braingler starting", "hosts", len(c.Hosts), "poll_s", c.PollIntervalSeconds)
 
 	var wg sync.WaitGroup
