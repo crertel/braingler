@@ -42,6 +42,8 @@ Usage:
   braingler issue-token   --name NAME --groups G1,G2       Mint a new API bearer token.
   braingler ca-info       [--config PATH]                  Print CA pubkeys + sshd_config / NixOS setup.
   braingler sign-host-key [--config PATH] HOST < HOSTKEY   Sign a host's pubkey, write cert to stdout.
+  braingler sign-user-key [--config PATH] --principal P [--ttl 1h] [--gen] < USERKEY
+                                                           Sign a user pubkey (or --gen one), write cert to stdout.
   braingler version
 `
 
@@ -70,6 +72,8 @@ func main() {
 		os.Exit(runCAInfo(os.Args[2:]))
 	case "sign-host-key":
 		os.Exit(runSignHostKey(os.Args[2:]))
+	case "sign-user-key":
+		os.Exit(runSignUserKey(os.Args[2:]))
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	default:
@@ -370,6 +374,131 @@ func runSignHostKey(args []string) int {
 	}
 	fmt.Println(sshca.MarshalCertificate(cert, "host="+hostName))
 	return 0
+}
+
+// runSignUserKey mints a one-off SSH *user* certificate from the user CA.
+// The pubkey to sign comes from stdin, or with --gen braingler generates an
+// ephemeral keypair and prints the private key alongside the cert. Unlike the
+// server's agent API this is fully offline — it only needs read access to the
+// CA key file — so it's the quick path for handing a human a short-lived login.
+func runSignUserKey(args []string) int {
+	fs := flag.NewFlagSet("sign-user-key", flag.ContinueOnError)
+	cfgPath := fs.String("config", "config.json", "path to config file")
+	principalCSV := fs.String("principal", "", "comma-separated login name(s) the cert is valid for")
+	ttlStr := fs.String("ttl", "", "cert lifetime as a Go duration (e.g. 1h, 30m); default = ssh_ca.human_ttl_seconds")
+	forceCmd := fs.String("force-command", "", "pin the cert to a single command (force-command critical option)")
+	keyID := fs.String("key-id", "", "override the cert KeyID (audit string in sshd logs)")
+	gen := fs.Bool("gen", false, "generate an ephemeral keypair instead of reading a pubkey from stdin")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	principals := splitCSV(*principalCSV)
+	if len(principals) == 0 {
+		fmt.Fprintln(os.Stderr, "sign-user-key: --principal is required (one or more comma-separated logins)")
+		return 2
+	}
+
+	c, err := config.Load(*cfgPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "config invalid: %v\n", err)
+		return 1
+	}
+	userCA, _, err := loadCAs(c)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "sign-user-key: %v\n", err)
+		return 1
+	}
+
+	ttl := time.Duration(c.SSHCA.HumanTTLSeconds) * time.Second
+	if *ttlStr != "" {
+		d, err := time.ParseDuration(*ttlStr)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "sign-user-key: bad --ttl: %v\n", err)
+			return 2
+		}
+		ttl = d
+	}
+
+	var pubKey ssh.PublicKey
+	var ephemeralPrivPEM []byte
+	if *gen {
+		ephemeralPrivPEM, pubKey, err = sshca.GenerateEphemeralUserKeypair()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "sign-user-key: %v\n", err)
+			return 1
+		}
+	} else {
+		pubBytes, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "sign-user-key: read stdin: %v\n", err)
+			return 1
+		}
+		pubKey, _, _, _, err = ssh.ParseAuthorizedKey(pubBytes)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "sign-user-key: parse pubkey: %v\n", err)
+			return 1
+		}
+	}
+
+	id := *keyID
+	if id == "" {
+		actor := os.Getenv("USER")
+		if actor == "" {
+			actor = "unknown"
+		}
+		id = fmt.Sprintf("cli=%s principal=%s", actor, strings.Join(principals, ","))
+	}
+
+	cert, err := userCA.SignUserCert(pubKey, sshca.UserCertOptions{
+		KeyID:           id,
+		ValidPrincipals: principals,
+		TTL:             ttl,
+		ForceCommand:    *forceCmd,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "sign-user-key: %v\n", err)
+		return 1
+	}
+
+	certLine := sshca.MarshalCertificate(cert, "principal="+strings.Join(principals, ","))
+	expires := time.Unix(int64(cert.ValidBefore), 0).UTC().Format(time.RFC1123)
+
+	if !*gen {
+		// Pipeable path: the cert and nothing but the cert on stdout, so the
+		// caller can `... > id_ed25519-cert.pub`. Diagnostics go to stderr.
+		fmt.Println(certLine)
+		fmt.Fprintf(os.Stderr, "signed user cert: principals=%s ttl=%s expires=%s\n",
+			strings.Join(principals, ","), ttl, expires)
+		return 0
+	}
+
+	// --gen: we hold the only copy of the private key, so emit a labeled
+	// bundle rather than a single pipeable line.
+	fmt.Println("New SSH user cert + ephemeral keypair — the private key is shown only once:")
+	fmt.Println()
+	fmt.Println("--- private key (save to e.g. ~/.ssh/id_lab, chmod 600) ---")
+	fmt.Print(string(ephemeralPrivPEM))
+	fmt.Println()
+	fmt.Println("--- public key ---")
+	fmt.Print(string(ssh.MarshalAuthorizedKey(pubKey)))
+	fmt.Println()
+	fmt.Println("--- certificate (save alongside as id_lab-cert.pub) ---")
+	fmt.Println(certLine)
+	fmt.Println()
+	fmt.Printf("principals=%s  ttl=%s  expires=%s\n", strings.Join(principals, ","), ttl, expires)
+	return 0
+}
+
+// splitCSV trims and drops empties from a comma-separated list.
+func splitCSV(s string) []string {
+	out := make([]string, 0)
+	for f := range strings.SplitSeq(s, ",") {
+		if f = strings.TrimSpace(f); f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 func runIssueToken(args []string) int {
