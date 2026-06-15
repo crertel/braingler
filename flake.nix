@@ -34,7 +34,7 @@
           pname = "braingler";
           version = "0.0.1";
           src = ./.;
-          vendorHash = null;
+          vendorHash = "sha256-dnb4IB9H9gRIzkW+6fQjSveXIprbtdFtGbP7Vdg4e24=";
           subPackages = [ "." ];
           meta = with pkgs.lib; {
             description = "Wake-on-LAN dashboard for homelab hosts";
