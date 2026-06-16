@@ -348,7 +348,7 @@ func (c *Config) HostByName(name string) *Host {
 // UserCan reports whether the user (by username) is permitted to perform the
 // given action on the given host. If auth is disabled this always returns true.
 func (c *Config) UserCan(username, hostName, action string) bool {
-	if c.hostActionForbidden(hostName, action) {
+	if c.HostActionForbidden(hostName, action) {
 		return false
 	}
 	if !c.Auth.Enabled {
@@ -362,13 +362,13 @@ func (c *Config) UserCan(username, hostName, action string) bool {
 	return false
 }
 
-// hostActionForbidden reports whether the host's OWN policy flags forbid the
+// HostActionForbidden reports whether the host's OWN policy flags forbid the
 // action, independent of who is asking and of whether auth is enabled. This is
 // a host-level safety pin (no_wake / no_shutdown), not a permission grant — it
 // can only deny. Checked first in every permission path so a pinned host's
 // wake/shutdown buttons disappear and its API/CLI calls are refused even with
 // auth off.
-func (c *Config) hostActionForbidden(hostName, action string) bool {
+func (c *Config) HostActionForbidden(hostName, action string) bool {
 	h := c.hostByName[hostName]
 	if h == nil {
 		return false
@@ -386,7 +386,7 @@ func (c *Config) hostActionForbidden(hostName, action string) bool {
 // principals. Callers that already have a Principal handy should prefer this
 // over UserCan — it avoids re-walking the user list per check.
 func (c *Config) PrincipalCan(p Principal, hostName, action string) bool {
-	if c.hostActionForbidden(hostName, action) {
+	if c.HostActionForbidden(hostName, action) {
 		return false
 	}
 	if !c.Auth.Enabled {

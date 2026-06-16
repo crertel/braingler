@@ -29,12 +29,18 @@
   {{end}}
 
   <div class="actions">
-    {{if .CanWake}}
+    {{if .WakeLocked}}
+    <button type="button" class="locked" disabled aria-disabled="true"
+            title="wake is disabled for this host (no_wake)">Wake</button>
+    {{else if .CanWake}}
     <form hx-post="/hosts/{{.Name}}/wake" hx-swap="none">
       <button type="submit"{{if .IsUp}} disabled title="host is up"{{end}}>Wake</button>
     </form>
     {{end}}
-    {{if .CanShutdown}}
+    {{if .ShutdownLocked}}
+    <button type="button" class="danger locked" disabled aria-disabled="true"
+            title="shutdown is disabled for this host (no_shutdown)">Shutdown</button>
+    {{else if .CanShutdown}}
     <form hx-post="/hosts/{{.Name}}/shutdown" hx-swap="none"
           hx-confirm="Shut down {{.DisplayName}}?">
       <button type="submit" class="danger"{{if not .IsUp}} disabled title="host is not up"{{end}}>Shutdown</button>

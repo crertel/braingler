@@ -197,6 +197,12 @@ func (s *Server) handleOpenAPISpec(w http.ResponseWriter, _ *http.Request) {
 // canDo checks whether the request's authenticated principal is permitted
 // to take action on hostName. When auth is disabled, all requests are allowed.
 func (s *Server) canDo(r *http.Request, hostName, action string) bool {
+	// Host-level safety pins (no_wake / no_shutdown) deny regardless of auth —
+	// checked first, ahead of the auth-disabled short-circuit below, so a
+	// pinned host is protected even when auth is off.
+	if s.cfg().HostActionForbidden(hostName, action) {
+		return false
+	}
 	if !s.cfg().Auth.Enabled {
 		return true
 	}

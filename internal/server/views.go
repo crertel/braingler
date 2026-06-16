@@ -31,6 +31,8 @@ type hostView struct {
 	PollSeconds       int
 	CanWake           bool
 	CanShutdown       bool
+	WakeLocked        bool // host pinned no_wake — show a disabled hazard button
+	ShutdownLocked    bool // host pinned no_shutdown — show a disabled hazard button
 }
 
 func newHostView(h *config.Host, st hosts.Status, pollSec int, canWake, canShutdown bool) hostView {
@@ -41,9 +43,11 @@ func newHostView(h *config.Host, st hosts.Status, pollSec int, canWake, canShutd
 		Reachable:   st.Reachable.String(),
 		IsUp:        st.Reachable == hosts.Up,
 		LastErr:     st.LastErr,
-		PollSeconds: pollSec,
-		CanWake:     canWake,
-		CanShutdown: canShutdown,
+		PollSeconds:    pollSec,
+		CanWake:        canWake,
+		CanShutdown:    canShutdown,
+		WakeLocked:     h.NoWake,
+		ShutdownLocked: h.NoShutdown,
 	}
 	if !st.LastChecked.IsZero() {
 		v.LastCheckedPretty = humanAgo(st.LastChecked)

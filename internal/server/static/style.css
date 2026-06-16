@@ -163,6 +163,26 @@ ul.disks .pct.high { color: var(--down); font-weight: 600; }
 .actions button.danger:hover { border-color: var(--danger); color: var(--danger); }
 .actions button[disabled] { opacity: 0.4; cursor: not-allowed; }
 
+/* Locked-out action (host pinned no_wake / no_shutdown): diagonal red hazard
+   stripes, non-clickable. Overrides the faded [disabled] look above so the
+   lockout reads as deliberate, not merely unavailable. */
+.actions button.locked[disabled] {
+  opacity: 1;
+  cursor: not-allowed;
+  color: #fff;
+  border-color: var(--danger-hover);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+  background-image: repeating-linear-gradient(
+    -45deg,
+    var(--danger) 0, var(--danger) 9px,
+    #2a2a2a 9px, #2a2a2a 18px
+  );
+}
+.actions button.locked[disabled]:hover {
+  border-color: var(--danger-hover);
+  color: #fff;
+}
+
 .checked {
   color: var(--muted);
   font-size: 0.75rem;
