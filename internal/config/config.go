@@ -126,6 +126,7 @@ type Host struct {
 	MaintenanceUser string           `json:"maintenance_user,omitempty"` // overrides ssh_defaults.user for braingler's own SSH ops
 	NoWake          bool             `json:"no_wake,omitempty"`          // forbid manual wake of this host (any caller, any auth mode)
 	NoShutdown      bool             `json:"no_shutdown,omitempty"`      // forbid manual shutdown of this host (any caller, any auth mode)
+	VerifyHostCert  bool             `json:"verify_host_cert,omitempty"` // require this host present a host cert signed by the host CA on braingler's own outbound SSH
 	SSH             *SSHConfig       `json:"ssh,omitempty"`
 	Checks          map[string]Check `json:"checks"`
 }

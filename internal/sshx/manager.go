@@ -22,7 +22,8 @@ import (
 //     directly. Host keys are not verified.
 //   - CA mode: braingler holds an ephemeral keypair, mints a short-lived
 //     user certificate per (host, user) cached for `maintenance_ttl_seconds`,
-//     and uses ssh.CertChecker to verify host certs when a host CA is set.
+//     and (for hosts with verify_host_cert set, when a host CA is loaded) uses
+//     ssh.CertChecker to verify the host's certificate.
 //
 // One Manager exists per running braingler. It's safe for concurrent use.
 type Manager struct {
@@ -164,7 +165,7 @@ func (m *Manager) dialWithSigner(ctx context.Context, h *config.Host, user strin
 	sshCfg := &ssh.ClientConfig{
 		User:            user,
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
-		HostKeyCallback: m.hostKeyCallback(),
+		HostKeyCallback: m.hostKeyCallback(h),
 		Timeout:         timeout,
 	}
 
@@ -182,13 +183,14 @@ func (m *Manager) dialWithSigner(ctx context.Context, h *config.Host, user strin
 	return &Client{cli: ssh.NewClient(c, chans, reqs)}, nil
 }
 
-// hostKeyCallback returns an ssh.HostKeyCallback that uses the host CA when
-// one is configured, and falls back to "trust on first sight" (no actual
-// verification) otherwise — preserving today's behavior in the unconfigured
-// case. ssh.CertChecker already validates the cert's principals against the
-// address we're dialing, so this layer is host-agnostic.
-func (m *Manager) hostKeyCallback() ssh.HostKeyCallback {
-	if m.hostCA == nil {
+// hostKeyCallback returns an ssh.HostKeyCallback for connecting to h. Host-cert
+// verification is OPT-IN per host: it requires both a configured host CA AND
+// h.verify_host_cert. Otherwise it falls back to "trust on first sight" (no
+// verification) — preserving the default behavior, and letting a cert-less host
+// (one not yet issued a host cert) stay reachable even when the CA is loaded.
+// ssh.CertChecker validates the cert's principals against the address dialed.
+func (m *Manager) hostKeyCallback(h *config.Host) ssh.HostKeyCallback {
+	if m.hostCA == nil || !h.VerifyHostCert {
 		return ssh.InsecureIgnoreHostKey()
 	}
 	checker := &ssh.CertChecker{
@@ -196,8 +198,8 @@ func (m *Manager) hostKeyCallback() ssh.HostKeyCallback {
 			return string(auth.Marshal()) == string(m.hostCA.PublicKey().Marshal())
 		},
 		// HostKeyFallback fires when the host presents a plain key instead
-		// of a cert. We reject in that case — if the operator turned host
-		// CA on, every host is expected to present a cert.
+		// of a cert. We reject in that case — this host opted in to
+		// verify_host_cert, so it's expected to present a cert.
 		HostKeyFallback: func(addr string, _ net.Addr, _ ssh.PublicKey) error {
 			return fmt.Errorf("ssh: %s did not present a host certificate (expected one signed by %s)",
 				addr, m.hostCA.Fingerprint())

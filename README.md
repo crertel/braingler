@@ -71,7 +71,11 @@ Ed25519 keypair (SSH has no notion of intermediate/chained CAs — the CA key
   in `sshd_config`; the cert's principals become valid login names.
 - **Host CA** (optional) — signs host certificates. Clients trust it via an
   `@cert-authority` line in `known_hosts`; this kills TOFU prompts and
-  host-key-changed warnings after a re-image.
+  host-key-changed warnings after a re-image. When `host_ca_key_file` is set,
+  braingler can *also* verify host certs on its own outbound SSH (monitoring /
+  shutdown) — but only for hosts that opt in with `"verify_host_cert": true`.
+  This is per-host on purpose: requiring certs globally would drop any host that
+  hasn't been issued one. Unset hosts keep the default (no host verification).
 
 Enable it in config:
 
