@@ -116,7 +116,7 @@ func runServe(args []string) int {
 			logger.Info("loaded host CA", "fingerprint", hostCA.Fingerprint())
 		}
 	}
-	sshMgr, err := sshx.NewManager(cfgPtr, userCA, hostCA)
+	sshMgr, err := sshx.NewManager(cfgPtr, userCA)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "sshx: %v\n", err)
 		return 1

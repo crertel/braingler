@@ -22,14 +22,13 @@ import (
 //     directly. Host keys are not verified.
 //   - CA mode: braingler holds an ephemeral keypair, mints a short-lived
 //     user certificate per (host, user) cached for `maintenance_ttl_seconds`,
-//     and (for hosts with verify_host_cert set, when a host CA is loaded) uses
-//     ssh.CertChecker to verify the host's certificate.
+//     and — for a host that lists trusted CAs in its host_cas — uses
+//     ssh.CertChecker to verify the host's certificate against that set.
 //
 // One Manager exists per running braingler. It's safe for concurrent use.
 type Manager struct {
 	cfgPtr *config.Pointer
 	userCA *sshca.CA // nil disables cert mode
-	hostCA *sshca.CA // nil disables host-cert verification
 
 	// In cert mode, braingler owns one in-memory Ed25519 keypair that every
 	// minted cert is bound to. Restarting braingler rotates the key (and
@@ -47,10 +46,11 @@ type cachedCert struct {
 }
 
 // NewManager constructs a Manager. userCA may be nil to disable cert mode.
-// hostCA may be nil to keep insecure-ignore host-key behavior.
-func NewManager(cfgPtr *config.Pointer, userCA, hostCA *sshca.CA) (*Manager, error) {
+// Host-cert verification is driven per-host by config (host_cas), not a
+// Manager-wide CA.
+func NewManager(cfgPtr *config.Pointer, userCA *sshca.CA) (*Manager, error) {
 	m := &Manager{
-		cfgPtr: cfgPtr, userCA: userCA, hostCA: hostCA,
+		cfgPtr: cfgPtr, userCA: userCA,
 		cache: map[string]cachedCert{},
 	}
 	if userCA != nil {
@@ -184,25 +184,39 @@ func (m *Manager) dialWithSigner(ctx context.Context, h *config.Host, user strin
 }
 
 // hostKeyCallback returns an ssh.HostKeyCallback for connecting to h. Host-cert
-// verification is OPT-IN per host: it requires both a configured host CA AND
-// h.verify_host_cert. Otherwise it falls back to "trust on first sight" (no
-// verification) — preserving the default behavior, and letting a cert-less host
-// (one not yet issued a host cert) stay reachable even when the CA is loaded.
-// ssh.CertChecker validates the cert's principals against the address dialed.
+// verification is OPT-IN per host and driven by h.host_cas — the set of host CA
+// pubkeys trusted to have signed THIS host's cert. A host's set can hold more
+// than one key, which covers both CA rotation (old + new during a cutover) and
+// distinct trust domains (different networks signed by different CAs).
+//
+// Empty host_cas → fall back to "trust on first sight" (no verification),
+// preserving the default and keeping a cert-less host reachable. The cert's
+// pubkeys are already validated at config load; any that fail to parse here are
+// skipped. ssh.CertChecker validates the cert's principals against the address.
 func (m *Manager) hostKeyCallback(h *config.Host) ssh.HostKeyCallback {
-	if m.hostCA == nil || !h.VerifyHostCert {
+	if len(h.HostCAs) == 0 {
 		return ssh.InsecureIgnoreHostKey()
+	}
+	authorities := make([]ssh.PublicKey, 0, len(h.HostCAs))
+	for _, s := range h.HostCAs {
+		if pk, _, _, _, err := ssh.ParseAuthorizedKey([]byte(s)); err == nil {
+			authorities = append(authorities, pk)
+		}
 	}
 	checker := &ssh.CertChecker{
 		IsHostAuthority: func(auth ssh.PublicKey, _ string) bool {
-			return string(auth.Marshal()) == string(m.hostCA.PublicKey().Marshal())
+			am := string(auth.Marshal())
+			for _, a := range authorities {
+				if am == string(a.Marshal()) {
+					return true
+				}
+			}
+			return false
 		},
-		// HostKeyFallback fires when the host presents a plain key instead
-		// of a cert. We reject in that case — this host opted in to
-		// verify_host_cert, so it's expected to present a cert.
+		// HostKeyFallback fires when the host presents a plain key instead of
+		// a cert. This host opted in via host_cas, so a cert is expected.
 		HostKeyFallback: func(addr string, _ net.Addr, _ ssh.PublicKey) error {
-			return fmt.Errorf("ssh: %s did not present a host certificate (expected one signed by %s)",
-				addr, m.hostCA.Fingerprint())
+			return fmt.Errorf("ssh: %s did not present a host certificate signed by a trusted host CA", addr)
 		},
 	}
 	return checker.CheckHostKey

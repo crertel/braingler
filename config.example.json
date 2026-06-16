@@ -35,7 +35,10 @@
       "mac": "02:00:00:00:00:11",
       "broadcast": "192.168.1.255",
       "no_shutdown": true,
-      "verify_host_cert": true,
+      "host_cas": [
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDnT6MsHPIuDY7CuDWPDo0XBFiFalYIoNJUWtV99xk4v example-host-ca-current",
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKtwjvXz+u0YuBMPHvP/plfUQSqI19owH7QjZlIW4LNS example-host-ca-previous"
+      ],
       "checks": {
         "ping":   { "enabled": true },
         "uptime": { "enabled": true },

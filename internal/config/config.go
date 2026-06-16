@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"golang.org/x/crypto/ssh"
 )
 
 const (
@@ -126,7 +128,7 @@ type Host struct {
 	MaintenanceUser string           `json:"maintenance_user,omitempty"` // overrides ssh_defaults.user for braingler's own SSH ops
 	NoWake          bool             `json:"no_wake,omitempty"`          // forbid manual wake of this host (any caller, any auth mode)
 	NoShutdown      bool             `json:"no_shutdown,omitempty"`      // forbid manual shutdown of this host (any caller, any auth mode)
-	VerifyHostCert  bool             `json:"verify_host_cert,omitempty"` // require this host present a host cert signed by the host CA on braingler's own outbound SSH
+	HostCAs         []string         `json:"host_cas,omitempty"`         // host CA pubkeys (authorized_keys format) trusted to sign THIS host's host cert on braingler's outbound SSH; empty = no host-cert verification
 	SSH             *SSHConfig       `json:"ssh,omitempty"`
 	Checks          map[string]Check `json:"checks"`
 }
@@ -236,6 +238,11 @@ func (c *Config) validate() error {
 		for name := range h.Checks {
 			if !validChecks[name] {
 				errs = append(errs, fmt.Errorf("%s: unknown check %q (valid: ping, uptime, load, memory, disk)", ctx, name))
+			}
+		}
+		for j, ca := range h.HostCAs {
+			if _, _, _, _, err := ssh.ParseAuthorizedKey([]byte(ca)); err != nil {
+				errs = append(errs, fmt.Errorf("%s: host_cas[%d] is not a valid SSH public key: %w", ctx, j, err))
 			}
 		}
 	}

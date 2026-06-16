@@ -71,11 +71,27 @@ Ed25519 keypair (SSH has no notion of intermediate/chained CAs — the CA key
   in `sshd_config`; the cert's principals become valid login names.
 - **Host CA** (optional) — signs host certificates. Clients trust it via an
   `@cert-authority` line in `known_hosts`; this kills TOFU prompts and
-  host-key-changed warnings after a re-image. When `host_ca_key_file` is set,
-  braingler can *also* verify host certs on its own outbound SSH (monitoring /
-  shutdown) — but only for hosts that opt in with `"verify_host_cert": true`.
-  This is per-host on purpose: requiring certs globally would drop any host that
-  hasn't been issued one. Unset hosts keep the default (no host verification).
+  host-key-changed warnings after a re-image. `host_ca_key_file` is the key
+  braingler *signs* host certs with.
+
+braingler can also **verify** host certs on its own outbound SSH (monitoring /
+shutdown), configured **per host** via `host_cas` — the list of host-CA public
+keys (authorized_keys format) trusted to have signed *that* host's cert:
+
+```json
+{ "name": "node1", "hostname": "...", "mac": "...", "broadcast": "...",
+  "host_cas": [
+    "ssh-ed25519 AAAA...currentHostCA",
+    "ssh-ed25519 AAAA...previousHostCA"
+  ] }
+```
+
+A connection is accepted if the host's cert was signed by **any** key in that
+host's list; an empty/unset list means **no** host-cert verification (the
+default — and what keeps a not-yet-issued host reachable). Because the list is
+per host and can hold several keys, it covers both **CA rotation** (trust old +
+new during a cutover) and **separate trust domains** (different networks signed
+by different CAs).
 
 Enable it in config:
 
