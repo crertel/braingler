@@ -124,6 +124,8 @@ type Host struct {
 	MAC             string           `json:"mac"`
 	Broadcast       string           `json:"broadcast"`
 	MaintenanceUser string           `json:"maintenance_user,omitempty"` // overrides ssh_defaults.user for braingler's own SSH ops
+	NoWake          bool             `json:"no_wake,omitempty"`          // forbid manual wake of this host (any caller, any auth mode)
+	NoShutdown      bool             `json:"no_shutdown,omitempty"`      // forbid manual shutdown of this host (any caller, any auth mode)
 	SSH             *SSHConfig       `json:"ssh,omitempty"`
 	Checks          map[string]Check `json:"checks"`
 }
@@ -346,6 +348,9 @@ func (c *Config) HostByName(name string) *Host {
 // UserCan reports whether the user (by username) is permitted to perform the
 // given action on the given host. If auth is disabled this always returns true.
 func (c *Config) UserCan(username, hostName, action string) bool {
+	if c.hostActionForbidden(hostName, action) {
+		return false
+	}
 	if !c.Auth.Enabled {
 		return true
 	}
@@ -357,10 +362,33 @@ func (c *Config) UserCan(username, hostName, action string) bool {
 	return false
 }
 
+// hostActionForbidden reports whether the host's OWN policy flags forbid the
+// action, independent of who is asking and of whether auth is enabled. This is
+// a host-level safety pin (no_wake / no_shutdown), not a permission grant — it
+// can only deny. Checked first in every permission path so a pinned host's
+// wake/shutdown buttons disappear and its API/CLI calls are refused even with
+// auth off.
+func (c *Config) hostActionForbidden(hostName, action string) bool {
+	h := c.hostByName[hostName]
+	if h == nil {
+		return false
+	}
+	switch action {
+	case ActionWake:
+		return h.NoWake
+	case ActionShutdown:
+		return h.NoShutdown
+	}
+	return false
+}
+
 // PrincipalCan is the unified permission check across user and agent
 // principals. Callers that already have a Principal handy should prefer this
 // over UserCan — it avoids re-walking the user list per check.
 func (c *Config) PrincipalCan(p Principal, hostName, action string) bool {
+	if c.hostActionForbidden(hostName, action) {
+		return false
+	}
 	if !c.Auth.Enabled {
 		return true
 	}

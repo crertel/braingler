@@ -43,6 +43,23 @@ braingler sign-user-key [--config PATH] --principal P [--ttl 1h] [--gen] < USERK
 braingler version
 ```
 
+## Protecting a host from wake / shutdown
+
+A host entry can opt out of being woken or shut down through braingler, as a
+safety pin (e.g. an always-on server you never want a stray dashboard click or
+API call to power off):
+
+```json
+{ "name": "fileserver", "hostname": "...", "mac": "...", "broadcast": "...",
+  "no_shutdown": true }
+```
+
+`no_shutdown` forbids the shutdown action and `no_wake` forbids wake — for
+*every* caller, in the web UI, the API, and the CLI, regardless of auth (they
+can only deny, never grant). A pinned host's wake/shutdown buttons disappear,
+the API returns `403 action_forbidden`, and `braingler wake|shutdown` refuses.
+Status/monitoring are unaffected.
+
 ## SSH certificate authority
 
 braingler can act as an SSH CA with two independent roles, each a single

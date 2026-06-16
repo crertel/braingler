@@ -34,6 +34,7 @@
       "hostname": "lab-alpha.local",
       "mac": "02:00:00:00:00:11",
       "broadcast": "192.168.1.255",
+      "no_shutdown": true,
       "checks": {
         "ping":   { "enabled": true },
         "uptime": { "enabled": true },
@@ -48,6 +49,7 @@
       "hostname": "lab-beta.local",
       "mac": "02:00:00:00:00:12",
       "broadcast": "192.168.1.255",
+      "no_wake": true,
       "checks": {
         "ping":   { "enabled": true },
         "uptime": { "enabled": true }

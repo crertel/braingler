@@ -222,6 +222,10 @@ func runWake(args []string) int {
 		fmt.Fprintf(os.Stderr, "wake: unknown host %q\n", rest[0])
 		return 1
 	}
+	if h.NoWake {
+		fmt.Fprintf(os.Stderr, "wake: %s is flagged no_wake (manual wake disabled)\n", h.Name)
+		return 1
+	}
 	mac, _ := net.ParseMAC(h.MAC)
 	bcast := net.ParseIP(h.Broadcast)
 	if err := wol.Wake(mac, bcast); err != nil {
@@ -244,6 +248,10 @@ func runShutdown(args []string) int {
 	h := c.HostByName(rest[0])
 	if h == nil {
 		fmt.Fprintf(os.Stderr, "shutdown: unknown host %q\n", rest[0])
+		return 1
+	}
+	if h.NoShutdown {
+		fmt.Fprintf(os.Stderr, "shutdown: %s is flagged no_shutdown (manual shutdown disabled)\n", h.Name)
 		return 1
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
